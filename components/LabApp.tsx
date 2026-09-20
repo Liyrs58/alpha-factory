@@ -6,14 +6,13 @@ import { EquityBoard } from "@/components/EquityBoard";
 import { FormulaEditor } from "@/components/FormulaEditor";
 import { ResultsBoard } from "@/components/ResultsBoard";
 import { cardsForAlpha } from "@/lib/agents/copy";
+import { criticRewrite, nextRefinedId } from "@/lib/agents/mutate";
 import { scratchBacktest } from "@/lib/agents/pipeline";
-import { SEED_LIBRARY } from "@/lib/alphas/library";
 import { formatSource, setDelayWindows } from "@/lib/alphas/parser";
 import { UNIVERSE } from "@/lib/data/universe";
 import type { AgentEvent, EvaluatedAlpha, PipelineResult, SeedAlpha } from "@/lib/types";
 
 const DELAYS = [1, 5, 14];
-const DEMO_PROPOSE = SEED_LIBRARY.filter((s) => s.source === "llm" || s.source === "wq");
 const AS_OF = UNIVERSE.dates[UNIVERSE.dates.length - 1] ?? "";
 
 function factoryNote(next: PipelineResult): string {
@@ -29,6 +28,20 @@ function downloadJson(name: string, payload: unknown) {
   URL.revokeObjectURL(a.href);
 }
 
+function toSeed(a: EvaluatedAlpha | SeedAlpha): SeedAlpha {
+  return {
+    id: a.id,
+    name: a.name,
+    category: a.category,
+    expression: a.expression,
+    source: a.source,
+    rationale: a.rationale,
+    parentId: a.parentId,
+    generation: a.generation,
+    mutation: a.mutation,
+  };
+}
+
 function applyFactory(
   next: PipelineResult,
   setResult: (r: PipelineResult) => void,
@@ -37,11 +50,15 @@ function applyFactory(
   setLastRun: (s: string) => void,
   setScratch: (a: EvaluatedAlpha | null) => void,
   note: (s: string) => void,
+  preferId?: string,
 ) {
   setResult(next);
   setScratch(null);
   const hero =
-    next.evaluated.find((a) => a.id === "A19") ?? next.book.selected[0] ?? next.evaluated[0];
+    next.evaluated.find((a) => a.id === preferId) ??
+    next.evaluated.find((a) => a.id === "A19") ??
+    next.book.selected[0] ??
+    next.evaluated[0];
   if (hero) {
     setSelectedId(hero.id);
     setExpr(hero.expression);
@@ -76,7 +93,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const note = useCallback((msg: string) => setStatus(msg), []);
 
   const compute = useCallback(
-    (extras: SeedAlpha[] = [], llmUsed = false) => {
+    (extras: SeedAlpha[] = [], llmUsed = false, preferId?: string) => {
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
@@ -106,7 +123,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           const next = (await res.json()) as PipelineResult;
           if (gen !== runGen.current) return;
           setBusy(false);
-          applyFactory(next, setResult, setSelectedId, setExpr, setLastRun, setScratch, note);
+          applyFactory(next, setResult, setSelectedId, setExpr, setLastRun, setScratch, note, preferId);
         } catch (e) {
           if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
             if (gen === runGen.current) {
@@ -121,9 +138,9 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
             const next = runPipeline(UNIVERSE, extras, llmUsed);
             if (gen !== runGen.current) return;
             setBusy(false);
-            applyFactory(next, setResult, setSelectedId, setExpr, setLastRun, setScratch, note);
+            applyFactory(next, setResult, setSelectedId, setExpr, setLastRun, setScratch, note, preferId);
           } catch (inner) {
-            if (gen === runGen.current) return;
+            if (gen !== runGen.current) return;
             setBusy(false);
             note(inner instanceof Error ? inner.message : "factory failed");
           }
@@ -220,49 +237,122 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
     }
   };
 
-  const proposeDemo = () => {
-    const seed = DEMO_PROPOSE[proposeIdx % DEMO_PROPOSE.length]!;
-    setProposeIdx((i) => i + 1);
-    pushExpr(seed.expression);
-    note(`demo propose ${seed.id} (no API key)`);
-    try {
-      const a = scratchBacktest(UNIVERSE, neutralized ? `zscore((${seed.expression}))` : seed.expression);
-      a.expression = seed.expression;
-      a.name = seed.name;
-      a.source = seed.source;
-      a.rationale = seed.rationale;
-      setScratch(a);
-      setSelectedId(a.id);
-      setScratchErr(null);
-    } catch (e) {
-      setScratchErr(e instanceof Error ? e.message : "eval failed");
-    }
-  };
-
   const proposeLlm = async () => {
     setLlmBusy(true);
+    note("proposer · requesting formulas…");
     try {
-      const res = await fetch("/api/propose", { method: "POST" });
+      const res = await fetch("/api/propose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset: proposeIdx }),
+      });
       const json = (await res.json()) as {
         ok: boolean;
         demo?: boolean;
         alphas: SeedAlpha[];
         message?: string;
       };
+      setProposeIdx((i) => i + 4);
       if (!json.ok || json.alphas.length === 0) {
-        setLlmMsg("demo propose · no API key");
-        proposeDemo();
+        setLlmMsg("propose failed");
+        note("propose failed");
         return;
       }
-      setLlmMsg(json.message ?? `+${json.alphas.length} LLM seeds`);
-      compute(json.alphas, true);
+      setLlmMsg(json.message ?? `+${json.alphas.length} formulas`);
+      compute(json.alphas, !json.demo, json.alphas[0]?.id);
     } catch {
-      setLlmMsg("demo propose · offline");
-      proposeDemo();
+      setLlmMsg("propose offline");
+      note("propose offline");
     } finally {
       setLlmBusy(false);
     }
   };
+
+  const onRefine = useCallback(() => {
+    if (!selected) {
+      note("refine empty · select a row");
+      return;
+    }
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const gen = ++runGen.current;
+    setBusy(true);
+    setAgent("critic");
+    setFilter("all");
+    note(`refining ${selected.id}…`);
+    const parent = toSeed(selected);
+    const pool = result.evaluated.map(toSeed);
+    const generation = parent.generation ?? 0;
+    void (async () => {
+      try {
+        const res = await fetch("/api/refine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parent, pool, generation }),
+          signal: ac.signal,
+        });
+        if (!res.ok) throw new Error(`refine HTTP ${res.status}`);
+        const json = (await res.json()) as {
+          ok: boolean;
+          mutation: string;
+          child: SeedAlpha;
+          result: PipelineResult;
+          message: string;
+        };
+        if (gen !== runGen.current) return;
+        if (!json.ok) throw new Error("refine failed");
+        setResult(json.result);
+        setScratch(null);
+        setSelectedId(json.child.id);
+        setExpr(json.child.expression);
+        setLastRun(`${AS_OF} 09:14:32`);
+        setBusy(false);
+        const child = json.result.evaluated.find((a) => a.id === json.child.id);
+        note(
+          `${json.message} · Sharpe ${(child?.metrics.sharpe ?? 0).toFixed(2)} · ${json.child.expression}`,
+        );
+      } catch (e) {
+        if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
+          if (gen === runGen.current) {
+            setBusy(false);
+            note("stopped");
+          }
+          return;
+        }
+        try {
+          const taken = result.evaluated.map((a) => a.expression);
+          const mut = criticRewrite(parent.expression, generation, taken);
+          const id = nextRefinedId(parent.id, result.evaluated.map((a) => a.id));
+          const a = scratchBacktest(UNIVERSE, mut.expression);
+          a.id = id;
+          a.name = `${parent.name} · ${mut.label}`;
+          a.category = parent.category;
+          a.source = parent.source;
+          a.rationale = mut.note;
+          a.parentId = parent.id;
+          a.generation = generation + 1;
+          a.mutation = mut.label;
+          a.expression = mut.expression;
+          if (gen !== runGen.current) return;
+          setResult({
+            ...result,
+            evaluated: [a, ...result.evaluated.filter((x) => x.id !== id)],
+            proposed: [...result.proposed, toSeed(a)],
+          });
+          setScratch(null);
+          setSelectedId(id);
+          setExpr(mut.expression);
+          setBusy(false);
+          note(`refine ${parent.id} → ${id} · ${mut.label} · Sharpe ${a.metrics.sharpe.toFixed(2)} · ${mut.expression}`);
+        } catch (inner) {
+          if (gen !== runGen.current) return;
+          setBusy(false);
+          note(inner instanceof Error ? inner.message : "refine failed");
+        }
+      }
+    })();
+  }, [note, result, selected]);
 
   const onAgent = (who: AgentEvent["agent"]) => {
     setAgent(who);
@@ -297,8 +387,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
       if (inField) return;
       if (e.key === "r") {
         e.preventDefault();
-        setBusy(true);
-        compute();
+        onRefine();
       }
       if (e.key === "j" || e.key === "k") {
         const idx = rows.findIndex((a) => a.id === selectedId);
@@ -310,7 +399,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, selectedId, compute, expr, selected, result]);
+  }, [rows, selectedId, compute, expr, selected, result, onRefine]);
 
   const period = `${UNIVERSE.dates[0]} – ${UNIVERSE.dates[UNIVERSE.dates.length - 1]}`;
   const asOf = UNIVERSE.dates[UNIVERSE.dates.length - 1];
@@ -425,10 +514,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           busy={busy}
           active={agent}
           onSelect={onAgent}
-          onRefine={() => {
-            setBusy(true);
-            compute();
-          }}
+          onRefine={onRefine}
         />
 
         <div className="grid min-h-0 flex-1 gap-2 lg:grid-cols-2">
@@ -452,7 +538,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
                 }}
               />
               {chartMetrics && (
-                <div className="flex min-h-0 flex-col gap-1">
+                <div className="relative z-10 flex min-h-0 flex-col gap-1 overflow-hidden">
                   <div className="flex gap-1 px-1">
                     <button
                       type="button"
