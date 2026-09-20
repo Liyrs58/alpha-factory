@@ -1,5 +1,5 @@
 import type { Universe, UniverseMeta } from "../types";
-import { readJsonFile, removeJsonFile, writeJsonFile } from "../store/fsjson";
+import { readJson, removeJson, writeJson } from "../store/backend";
 import { UNIVERSE } from "./universe";
 
 export type { UniverseMeta };
@@ -16,18 +16,18 @@ export function metaOf(u: Universe, source: UniverseMeta["source"]): UniverseMet
   };
 }
 
-export function getActiveUniverse(): { universe: Universe; meta: UniverseMeta } {
-  const override = readJsonFile<Universe>(FILE);
+export async function getActiveUniverse(): Promise<{ universe: Universe; meta: UniverseMeta }> {
+  const override = await readJson<Universe>(FILE);
   if (override?.tickers?.length && override.dates?.length && override.bars) {
     return { universe: override, meta: metaOf(override, "upload") };
   }
   return { universe: UNIVERSE, meta: metaOf(UNIVERSE, "DEMO10") };
 }
 
-export function setUploadedUniverse(u: Universe) {
-  writeJsonFile(FILE, u);
+export async function setUploadedUniverse(u: Universe): Promise<void> {
+  await writeJson(FILE, u);
 }
 
-export function resetUploadedUniverse() {
-  removeJsonFile(FILE);
+export async function resetUploadedUniverse(): Promise<void> {
+  await removeJson(FILE);
 }

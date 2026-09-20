@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   } catch {
     extras = [];
   }
-  const { universe, meta } = getActiveUniverse();
+  const { universe, meta } = await getActiveUniverse();
   const result = runPipeline(universe, extras, llmUsed, meta);
   const kept = result.evaluated.filter((a) => !SEED_IDS.has(a.id)).map((a) => ({
     id: a.id,
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     generation: a.generation,
     mutation: a.mutation,
   }));
-  upsertSession(
+  await upsertSession(
     { extras: kept, llmUsed, selectedId: result.book.selected[0]?.id ?? null },
     {
       at: new Date().toISOString(),

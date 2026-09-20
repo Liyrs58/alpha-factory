@@ -6,9 +6,27 @@ import { universeFromCsv } from "./data/csv";
 import { criticRewrite } from "./agents/mutate";
 import { mockPropose } from "./agents/propose-mock";
 import { runPipeline, scratchBacktest } from "./agents/pipeline";
-import { LIVE_TRADING, PAPER_BROKER, llmProvider } from "./flags";
+import { LIVE_TRADING, PAPER_BROKER, llmProvider, publicFlags } from "./flags";
 import { extractJsonObject, appendSsePayload, NIM_MODEL, NIM_TIMEOUT_MS } from "./llm/nvidia";
 import { emptySession, loadSession, upsertSession } from "./store/session";
+import { isDurableStore, storeBackend } from "./store/backend";
+import {
+  accessCodeValid,
+  authRequired,
+  signGateCookie,
+  verifyGateCookie,
+} from "./auth";
+import {
+  alpacaKeysReady,
+  isAllowedPaperBase,
+  isLiveAlpacaUrl,
+  paperBaseUrl,
+  paperMode,
+  readPaperAccount,
+  symbolAllowedOnAlpaca,
+  submitPaperOrder,
+} from "./broker/alpaca";
+import { researchBookOrders } from "./broker/book";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -30,7 +48,7 @@ function sampleCsv(): string {
   return rows.join("\n");
 }
 
-function main() {
+async function main() {
   for (const seed of SEED_LIBRARY) {
     const ast = parse(seed.expression);
     assert(pretty(ast).length > 0, `pretty failed ${seed.id}`);
@@ -67,6 +85,7 @@ function main() {
 
   assert(LIVE_TRADING === false, "LIVE_TRADING must be hard-false");
   assert(PAPER_BROKER.enabled === false, "paper broker disabled");
+  assert(paperMode() === "off", "default paper mode is off");
   assert(llmProvider() === "mock", "default LLM is mock without NVIDIA_API_KEY");
   assert(NIM_MODEL === "google/gemma-4-31b-it", "NIM model locked to gemma-4-31b-it");
   assert(NIM_TIMEOUT_MS >= 180_000, "NIM timeout must cover ~2 min cold start");
@@ -81,6 +100,79 @@ function main() {
   assert(appendSsePayload("hello", "[DONE]") === "hello", "SSE done is a no-op");
   const extracted = extractJsonObject('noise ```json\n{"expression":"rank(close)"}\n```');
   assert(extracted.includes("rank(close)"), "NIM json fence extract");
+
+  assert(isLiveAlpacaUrl("https://api.alpaca.markets"), "live alpaca host");
+  assert(isLiveAlpacaUrl("https://api.alpaca.markets/v2"), "live alpaca path");
+  assert(!isLiveAlpacaUrl("https://paper-api.alpaca.markets"), "paper alpaca host");
+  assert(isAllowedPaperBase("https://paper-api.alpaca.markets"), "paper base allowed");
+  assert(!isAllowedPaperBase("https://api.alpaca.markets"), "live base not allowed");
+  const prevBase = process.env.ALPACA_BASE_URL;
+  process.env.ALPACA_BASE_URL = "https://api.alpaca.markets";
+  const liveBase = paperBaseUrl();
+  assert(!liveBase.ok, "refuse live Alpaca URL");
+  process.env.ALPACA_BASE_URL = "https://broker-app.alpaca.markets";
+  assert(!paperBaseUrl().ok, "refuse non-paper alpaca host");
+  if (prevBase === undefined) delete process.env.ALPACA_BASE_URL;
+  else process.env.ALPACA_BASE_URL = prevBase;
+  const paperBase = paperBaseUrl();
+  assert(paperBase.ok && paperBase.url === "https://paper-api.alpaca.markets", "default paper base");
+
+  assert(symbolAllowedOnAlpaca("SPY", "DEMO10"), "listed symbol ok on DEMO10");
+  assert(!symbolAllowedOnAlpaca("NRGX", "DEMO10"), "synthetic DEMO10 blocked on Alpaca");
+  assert(symbolAllowedOnAlpaca("AAA", "upload"), "uploaded ticker may go to paper");
+
+  const prevBroker = process.env.PAPER_BROKER;
+  process.env.PAPER_BROKER = "alpaca";
+  assert(paperMode() === "sim", "alpaca without keys is offline simulator");
+  const simFill = await submitPaperOrder({ symbol: "SPY", side: "buy", qty: 1, type: "market" }, "upload");
+  assert(simFill.ok && simFill.source === "sim", "simulator fill");
+  const demoRefuse = await submitPaperOrder({ symbol: "NRGX", side: "buy", qty: 1, type: "market" }, "DEMO10");
+  assert(demoRefuse.ok && demoRefuse.source === "sim", "sim still fills synthetic names");
+  if (prevBroker === undefined) delete process.env.PAPER_BROKER;
+  else process.env.PAPER_BROKER = prevBroker;
+  assert(paperMode() === "off", "paper mode restored off");
+
+  if (alpacaKeysReady()) {
+    const prevPing = process.env.PAPER_BROKER;
+    process.env.PAPER_BROKER = "alpaca";
+    const acc = await readPaperAccount();
+    assert(acc.ok, acc.ok ? "paper account" : acc.reason);
+    assert(acc.account.source === "alpaca", "paper account source");
+    assert(String(acc.account.status).toUpperCase() === "ACTIVE", "paper account ACTIVE");
+    if (prevPing === undefined) delete process.env.PAPER_BROKER;
+    else process.env.PAPER_BROKER = prevPing;
+  }
+
+  const legs = researchBookOrders(UNIVERSE, result.book, 1);
+  assert(legs.length === 4, "research book top-4 longs");
+  assert(legs.every((o) => o.side === "buy" && o.type === "market"), "research book buys");
+
+  assert(!authRequired(), "auth public when DEMO_ACCESS_CODE unset");
+  const prevCode = process.env.DEMO_ACCESS_CODE;
+  const prevSecret = process.env.AUTH_SECRET;
+  process.env.DEMO_ACCESS_CODE = "demo-gate";
+  process.env.AUTH_SECRET = "unit-test-secret";
+  assert(authRequired(), "auth required when code set");
+  assert(accessCodeValid("demo-gate"), "access code matches");
+  assert(!accessCodeValid("nope"), "access code rejects");
+  const cookie = signGateCookie();
+  assert(cookie && verifyGateCookie(cookie), "signed cookie verifies");
+  assert(!verifyGateCookie("v1.1.deadbeef"), "tampered cookie fails");
+  if (prevCode === undefined) delete process.env.DEMO_ACCESS_CODE;
+  else process.env.DEMO_ACCESS_CODE = prevCode;
+  if (prevSecret === undefined) delete process.env.AUTH_SECRET;
+  else process.env.AUTH_SECRET = prevSecret;
+
+  assert(!isDurableStore(), "store ephemeral without blob token");
+  assert(storeBackend() === "ephemeral", "store backend ephemeral");
+  const flags = publicFlags();
+  assert(flags.liveTrading === false, "flags liveTrading");
+  assert(flags.store.durable === false, "flags store.durable");
+  assert(flags.auth.required === false, "flags auth.required");
+  assert(flags.llm === "mock", "flags llm badge mock");
+  assert(flags.paper.broker === "off", "flags paper off");
+  assert(flags.paper.keys === false, "flags paper keys unset");
+  assert(flags.paper.base === "https://paper-api.alpaca.markets", "flags paper base");
 
   const csv = universeFromCsv(sampleCsv());
   assert(csv.ok, "csv parse");
@@ -98,7 +190,7 @@ function main() {
     assert(uploaded.evaluated.length === SEED_LIBRARY.length, "upload eval");
   }
 
-  const saved = upsertSession(
+  const saved = await upsertSession(
     {
       extras: [{ id: "A19R1", name: "t", category: "momentum", expression: parent, source: "wq", rationale: "test" }],
       selectedId: "A19R1",
@@ -107,11 +199,11 @@ function main() {
     },
     { at: new Date().toISOString(), kind: "refine", note: "selftest refine", extraIds: ["A19R1"], selectedId: "A19R1" },
   );
-  const loaded = loadSession();
+  const loaded = await loadSession();
   assert(loaded.extras.some((s) => s.id === "A19R1"), "session extras persist");
   assert(loaded.runs.some((r) => r.kind === "refine"), "session runs persist");
   assert(saved.version === 1, "session version");
-  upsertSession(emptySession());
+  await upsertSession(emptySession());
 
   console.log(
     JSON.stringify(
@@ -127,6 +219,8 @@ function main() {
         mockIds: mock.map((s) => s.id),
         llm: llmProvider(),
         liveTrading: LIVE_TRADING,
+        store: storeBackend(),
+        paper: paperMode(),
         sessionExtras: loaded.extras.map((s) => s.id),
       },
       null,
@@ -135,4 +229,7 @@ function main() {
   );
 }
 
-main();
+void main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -23,6 +23,12 @@ export function FormulaEditor({
   universeLabel = "DEMO10",
   onPickCsv,
   onResetUniverse,
+  paperMode = "off",
+  paperAccount = null,
+  paperBusy = false,
+  paperSymbol,
+  onPaperSymbol,
+  onPaperSubmit,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -42,6 +48,12 @@ export function FormulaEditor({
   universeLabel?: string;
   onPickCsv?: (text: string, name: string) => void;
   onResetUniverse?: () => void;
+  paperMode?: "off" | "alpaca" | "sim";
+  paperAccount?: { cash: number; equity: number; source: string; status: string } | null;
+  paperBusy?: boolean;
+  paperSymbol?: string;
+  onPaperSymbol?: (v: string) => void;
+  onPaperSubmit?: () => void;
 }) {
   const parsed = useMemo(() => {
     try {
@@ -144,8 +156,42 @@ export function FormulaEditor({
           <span className="mt-1 block text-[#6b675e]">
             LLM: NVIDIA NIM <span className="text-[#2A6A42]">google/gemma-4-31b-it</span> when
             <span className="text-[#2A6A42]"> NVIDIA_API_KEY</span> is set, else mock.
-            LIVE_TRADING=false (paper broker not wired).
+            LIVE_TRADING=false forever. Paper broker: {paperMode}
+            {paperMode === "off"
+              ? " (offline)."
+              : paperMode === "alpaca"
+                ? " · Alpaca paper-api only."
+                : " · offline simulator (no Alpaca keys)."}
           </span>
+          {paperMode !== "off" && (
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <span className="text-[#6b675e]">
+                {paperAccount
+                  ? `${paperAccount.source} ${paperAccount.status} · cash ${paperAccount.cash.toFixed(0)} · eq ${paperAccount.equity.toFixed(0)}`
+                  : "paper account…"}
+              </span>
+              <input
+                type="text"
+                aria-label="Paper symbol"
+                placeholder="symbol (optional)"
+                value={paperSymbol ?? ""}
+                onChange={(e) => onPaperSymbol?.(e.target.value)}
+                className="w-28 border border-[#d4cfc4] bg-paper px-1.5 py-0.5 font-formula text-[11px] text-ink outline-none"
+              />
+              <button
+                type="button"
+                aria-label="Paper submit"
+                className="border border-ink px-2 py-0.5 hover:bg-ink hover:text-paper disabled:opacity-40"
+                disabled={paperBusy || !onPaperSubmit}
+                onClick={onPaperSubmit}
+              >
+                {paperBusy ? "PAPER…" : "Paper submit"}
+              </button>
+              <span className="text-[#9a9488]">
+                explicit only · research book longs if symbol empty · never on REFINE
+              </span>
+            </div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <label className="cursor-pointer hover:text-ink">
               UPLOAD OHLCV

@@ -5,7 +5,7 @@ import { upsertSession } from "@/lib/store/session";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const { meta } = getActiveUniverse();
+  const { meta } = await getActiveUniverse();
   return Response.json({
     ok: true,
     meta: {
@@ -36,9 +36,9 @@ export async function POST(req: Request) {
   if (!parsed.ok) {
     return Response.json({ ok: false, message: parsed.message }, { status: 400 });
   }
-  setUploadedUniverse(parsed.universe);
-  const { meta } = getActiveUniverse();
-  upsertSession(
+  await setUploadedUniverse(parsed.universe);
+  const { meta } = await getActiveUniverse();
+  await upsertSession(
     {},
     {
       at: new Date().toISOString(),
@@ -51,9 +51,9 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE() {
-  resetUploadedUniverse();
-  const { meta } = getActiveUniverse();
-  upsertSession(
+  await resetUploadedUniverse();
+  const { meta } = await getActiveUniverse();
+  await upsertSession(
     {},
     {
       at: new Date().toISOString(),

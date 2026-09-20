@@ -86,7 +86,7 @@ export async function POST(req: Request) {
   };
 
   const nextPool = [...pool.filter((s) => s.id !== id), child];
-  const { universe, meta } = getActiveUniverse();
+  const { universe, meta } = await getActiveUniverse();
   const result = runPipelineFromSeeds(universe, nextPool, mut.source === "llm", meta);
   const evaluated = result.evaluated.find((a) => a.id === id) ?? result.evaluated[0];
 
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
       mutation: a.mutation,
     }));
 
-  upsertSession(
+  await upsertSession(
     {
       extras,
       selectedId: child.id,

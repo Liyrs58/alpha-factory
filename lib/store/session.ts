@@ -1,5 +1,5 @@
 import type { SeedAlpha } from "../types";
-import { readJsonFile, writeJsonFile } from "./fsjson";
+import { readJson, writeJson } from "./backend";
 import type { LabSession, StoredRun } from "./types";
 
 export type { LabSession, StoredRun } from "./types";
@@ -19,8 +19,8 @@ export function emptySession(): LabSession {
   };
 }
 
-export function loadSession(): LabSession {
-  const raw = readJsonFile<Partial<LabSession>>(FILE);
+export async function loadSession(): Promise<LabSession> {
+  const raw = await readJson<Partial<LabSession>>(FILE);
   if (!raw || raw.version !== 1) return emptySession();
   return {
     ...emptySession(),
@@ -31,7 +31,7 @@ export function loadSession(): LabSession {
   };
 }
 
-export function saveSession(next: LabSession): LabSession {
+export async function saveSession(next: LabSession): Promise<LabSession> {
   const clipped: LabSession = {
     ...next,
     version: 1,
@@ -39,7 +39,7 @@ export function saveSession(next: LabSession): LabSession {
     extras: next.extras.slice(-80),
     runs: next.runs.slice(-MAX_RUNS),
   };
-  writeJsonFile(FILE, clipped);
+  await writeJson(FILE, clipped);
   return clipped;
 }
 
@@ -49,11 +49,11 @@ export function mergeExtras(base: SeedAlpha[], incoming: SeedAlpha[]): SeedAlpha
   return [...map.values()];
 }
 
-export function upsertSession(
+export async function upsertSession(
   patch: Partial<Omit<LabSession, "version">>,
   run?: StoredRun,
-): LabSession {
-  const cur = loadSession();
+): Promise<LabSession> {
+  const cur = await loadSession();
   const extras = patch.extras ? mergeExtras(cur.extras, patch.extras) : cur.extras;
   const runs = run ? [...cur.runs, run] : (patch.runs ?? cur.runs);
   return saveSession({
