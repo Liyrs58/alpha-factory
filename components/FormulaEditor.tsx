@@ -20,6 +20,9 @@ export function FormulaEditor({
   delay,
   onToggleNeutralized,
   onCycleDelay,
+  universeLabel = "DEMO10",
+  onPickCsv,
+  onResetUniverse,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -36,6 +39,9 @@ export function FormulaEditor({
   delay: number;
   onToggleNeutralized: () => void;
   onCycleDelay: () => void;
+  universeLabel?: string;
+  onPickCsv?: (text: string, name: string) => void;
+  onResetUniverse?: () => void;
 }) {
   const parsed = useMemo(() => {
     try {
@@ -134,7 +140,40 @@ export function FormulaEditor({
         <div className="border-t border-[#d4cfc4] bg-[#efebe3] px-3 py-2 font-formula text-[11px] leading-5 text-[#3a3832]">
           Settings · neutralize wraps the next eval in <span className="text-[#2A6A42]">zscore(…)</span>
           · delay rewrites <span className="text-[#2A6A42]">delay / ts_delta</span> windows.
-          Play runs the editor against DEMO10. Stop cancels an in-flight factory run.
+          Play evals the editor on the active universe ({universeLabel}). Stop cancels an in-flight factory run.
+          <span className="mt-1 block text-[#6b675e]">
+            LLM: NVIDIA NIM <span className="text-[#2A6A42]">google/gemma-4-31b-it</span> when
+            <span className="text-[#2A6A42]"> NVIDIA_API_KEY</span> is set, else mock.
+            LIVE_TRADING=false (paper broker not wired).
+          </span>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <label className="cursor-pointer hover:text-ink">
+              UPLOAD OHLCV
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                aria-label="Upload OHLCV CSV"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file || !onPickCsv) return;
+                  void file.text().then((text) => onPickCsv(text, file.name));
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              aria-label="Reset DEMO10 universe"
+              className="hover:text-ink"
+              onClick={onResetUniverse}
+            >
+              RESET DEMO10
+            </button>
+            <span className="text-[#9a9488]">
+              CSV header: date,ticker,open,high,low,close,volume[,vwap]
+            </span>
+          </div>
         </div>
       )}
       {parsed.ast && (
@@ -194,7 +233,7 @@ function GearIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden>
       <circle cx="6" cy="6" r="2" />
-      <path d="M6 1.5v1.4M6 9.1v1.4M1.5 6h1.4M9.1 6h1.4M2.8 2.8l1 1M8.2 8.2l1 1M8.2 3.8l1-1M2.8 9.2l1-1" />
+      <path d="M6 1.5v1.4M6 9.1v1.4M1.5 6h1.4M9.1 6h1.4M2.8 2.8l1 1M8.2 8.2l1 1M2.8 9.2l1-1M8.2 3.8l1-1" />
     </svg>
   );
 }
