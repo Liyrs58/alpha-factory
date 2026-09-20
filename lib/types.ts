@@ -51,6 +51,9 @@ export type SeedAlpha = {
   expression: string;
   source: AlphaSource;
   rationale: string;
+  parentId?: string;
+  generation?: number;
+  mutation?: string;
 };
 
 export type AlphaMetrics = {

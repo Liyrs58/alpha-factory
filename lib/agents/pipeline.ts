@@ -192,13 +192,32 @@ function compositeBacktest(
   return { daily, equity: fromReturns(daily).equity };
 }
 
+export function evaluateSeed(panel: Panel, seed: SeedAlpha): EvaluatedAlpha {
+  return evaluateOne(panel, seed);
+}
+
+export function runPipelineFromSeeds(
+  universe: Universe,
+  seeds: SeedAlpha[],
+  llmUsed = false,
+): PipelineResult {
+  return runPipelineOn(universe, seeds, llmUsed);
+}
+
 export function runPipeline(
   universe: Universe,
   extras: SeedAlpha[] = [],
   llmUsed = false,
 ): PipelineResult {
+  return runPipelineOn(universe, [...SEED_LIBRARY, ...extras], llmUsed);
+}
+
+function runPipelineOn(
+  universe: Universe,
+  proposed: SeedAlpha[],
+  llmUsed: boolean,
+): PipelineResult {
   const panel = buildPanel(universe);
-  const proposed = [...SEED_LIBRARY, ...extras];
   const events: AgentEvent[] = [];
   let tick = 0;
 
@@ -206,8 +225,8 @@ export function runPipeline(
     agent: "proposer",
     t: stamp(tick++),
     body: llmUsed
-      ? `LLM hook live. Merged ${extras.length} generated seeds into SAF (${SEED_LIBRARY.length} library + ${extras.length} new).`
-      : `Demo SAF · ${SEED_LIBRARY.length} executable seeds from paper taxonomy + LLM-style WQ skeletons. No API key — library path.`,
+      ? `LLM/refine path. Evaluating ${proposed.length} formulas (SAF + generated).`
+      : `Demo SAF · ${proposed.length} executable seeds from paper taxonomy + LLM-style WQ skeletons.`,
     tone: "info",
   });
 
@@ -221,7 +240,7 @@ export function runPipeline(
 
   const evaluated = proposed.map((seed) => {
     try {
-      return evaluateOne(panel, seed);
+      return evaluateSeed(panel, seed);
     } catch (err) {
       const failed: EvaluatedAlpha = {
         ...seed,
