@@ -1,4 +1,4 @@
-use client";
+"use client";
 
 import { useMemo, useRef, useState } from "react";
 import { clsx, fmtNum, fmtPct } from "@/lib/format";
@@ -66,12 +66,17 @@ export function EquityBoard({
   });
 
   const hi = hover !== null ? Math.max(0, Math.min(n - 1, hover)) : null;
-  const cagr = metrics.totalReturn; // shown separately as total; annualized below
+  const cagr = metrics.totalReturn;
   const yearsN = Math.max((n - 1) / 252, 1e-9);
   const ann = Math.pow(1 + (sliced.eq[n - 1]! / sliced.eq[0]! - 1 || 0), 1 / yearsN) - 1;
   const clamped = range !== "ALL" && BARS[range] > dates.length;
 
   const svgRef = useRef<SVGSVGElement>(null);
+
+  const setWindow = (r: Range) => {
+    setRange(r);
+    onNotice?.(`window ${r}${r !== "ALL" && BARS[r] > dates.length ? " · clamped to sample" : ""}`);
+  };
 
   const exportPng = () => {
     const svg = svgRef.current;
@@ -124,22 +129,51 @@ export function EquityBoard({
   };
 
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-[4px] border border-line bg-[#16181f]">
+    <section className="relative z-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[4px] border border-line bg-[#16181f]">
       <header
         data-equity-header
-        className="flex items-center justify-between border-b border-line px-3 py-1.5 font-formula text-[10px] tracking-wide text-mute"
+        className="relative z-30 flex shrink-0 flex-wrap items-center gap-1 border-b border-line bg-[#16181f] px-2 py-1.5 font-formula text-[10px] tracking-wide text-mute"
       >
-        <span>
+        <span className="mr-2 text-paper">
           EQUITY CURVE • {range}
           <span className="ml-2 text-faint">
             {sliced.dt[0] ?? "—"} → {sliced.dt[sliced.dt.length - 1] ?? "—"} · {n} bars
             {clamped ? " · clamped to sample" : ""}
           </span>
         </span>
+        <div className="relative z-30 ml-auto flex shrink-0 items-center gap-1">
+          {RANGES.map((r) => (
+            <button
+              key={r}
+              type="button"
+              aria-label={`Chart window ${r}`}
+              aria-pressed={range === r}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setWindow(r);
+              }}
+              className={clsx(
+                "relative z-30 min-h-8 min-w-8 pointer-events-auto px-2 py-1 font-formula text-[10px] tracking-wide",
+                range === r ? "bg-paper text-ink" : "text-mute hover:text-paper",
+              )}
+            >
+              {r}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-label="Export equity PNG"
+            onClick={exportPng}
+            className="relative z-30 ml-1 border border-line px-2 py-1 font-formula text-[10px] text-mute hover:text-paper"
+          >
+            EXPORT PNG
+          </button>
+        </div>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_148px]">
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_148px]">
         <div
-          className="relative z-0 min-h-[200px] overflow-hidden"
+          className="relative z-0 isolate min-h-[200px] min-w-0 overflow-hidden"
           onMouseMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const px = ((e.clientX - rect.left) / rect.width) * w;
@@ -149,8 +183,11 @@ export function EquityBoard({
         >
           <svg
             ref={svgRef}
+            data-equity-svg
             viewBox={`0 0 ${w} ${h}`}
-            className="pointer-events-none h-full w-full"
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            style={{ pointerEvents: "none" }}
+            preserveAspectRatio="none"
             xmlns="http://www.w3.org/2000/svg"
           >
             <rect width={w} height={h} fill="#16181f" />
@@ -187,7 +224,7 @@ export function EquityBoard({
               </text>
             ))}
           </svg>
-          <div className="pointer-events-none absolute bottom-7 left-10 font-formula text-[10px] text-mute">
+          <div className="pointer-events-none absolute bottom-7 left-10 z-0 font-formula text-[10px] text-mute">
             {label}
             {metrics.sharpe > 0 ? (
               <span className="text-signal"> (Sharpe {fmtNum(metrics.sharpe, 2)})</span>
@@ -196,12 +233,12 @@ export function EquityBoard({
             )}
           </div>
           {hi !== null && sliced.eq[hi] !== undefined && (
-            <div className="pointer-events-none absolute top-2 right-3 font-formula text-[11px] text-paper">
+            <div className="pointer-events-none absolute top-2 right-3 z-0 font-formula text-[11px] text-paper">
               {sliced.dt[hi]} {fmtPct(sliced.eq[hi]! / sliced.eq[0]! - 1, 1)}
             </div>
           )}
         </div>
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-line px-3 py-3 font-formula text-[12px] md:grid-cols-1 md:border-t-0 md:border-l">
+        <dl className="relative z-10 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-line px-3 py-3 font-formula text-[12px] md:grid-cols-1 md:border-t-0 md:border-l">
           <Stat k="TOTAL RETURN" v={fmtPct(cagr, 1)} pos={cagr} />
           <Stat k="ANNUALIZED" v={fmtPct(ann, 1)} pos={ann} />
           <Stat k="SHARPE" v={fmtNum(metrics.sharpe, 2)} pos={metrics.sharpe} sharpe />
@@ -209,34 +246,6 @@ export function EquityBoard({
           <Stat k="CALMAR" v={fmtNum(metrics.calmar, 2)} pos={metrics.calmar} />
         </dl>
       </div>
-      <footer className="relative z-20 flex shrink-0 items-center gap-1 border-t border-line px-2 py-1.5">
-        {RANGES.map((r) => (
-          <button
-            key={r}
-            type="button"
-            aria-label={`Chart window ${r}`}
-            aria-pressed={range === r}
-            onClick={() => {
-              setRange(r);
-              onNotice?.(`window ${r}${r !== "ALL" && BARS[r] > dates.length ? " · clamped to sample" : ""}`);
-            }}
-            className={clsx(
-              "relative z-20 px-2 py-0.5 font-formula text-[10px] tracking-wide",
-              range === r ? "bg-paper text-ink" : "text-mute hover:text-paper",
-            )}
-          >
-            {r}
-          </button>
-        ))}
-        <button
-          type="button"
-          aria-label="Export equity PNG"
-          onClick={exportPng}
-          className="ml-auto border border-line px-2 py-0.5 font-formula text-[10px] text-mute hover:text-paper"
-        >
-          EXPORT PNG
-        </button>
-      </footer>
     </section>
   );
 }
