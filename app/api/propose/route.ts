@@ -1,4 +1,5 @@
 import { parse } from "@/lib/alphas/parser";
+import { mockPropose } from "@/lib/agents/propose-mock";
 import type { Category, SeedAlpha } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -53,16 +54,25 @@ function sanitize(raw: Payload): SeedAlpha[] {
   return out.slice(0, 6);
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  let offset = 0;
+  try {
+    const body = (await req.json()) as { offset?: number };
+    offset = body.offset ?? 0;
+  } catch {
+    offset = 0;
+  }
+
   const openai = process.env.OPENAI_API_KEY;
   const anthropic = process.env.ANTHROPIC_API_KEY;
 
   if (!openai && !anthropic) {
+    const alphas = mockPropose(offset, 4);
     return Response.json({
-      ok: false,
+      ok: true,
       demo: true,
-      alphas: [] as SeedAlpha[],
-      message: "No OPENAI_API_KEY or ANTHROPIC_API_KEY. Demo library used.",
+      alphas,
+      message: `mock LLM · ${alphas.map((a) => a.id).join(",")}`,
     });
   }
 
@@ -91,7 +101,10 @@ export async function POST() {
       });
       if (!res.ok) {
         const err = await res.text();
-        return Response.json({ ok: false, demo: true, alphas: [], message: err.slice(0, 240) }, { status: 200 });
+        return Response.json(
+          { ok: true, demo: true, alphas: mockPropose(offset, 4), message: err.slice(0, 240) },
+          { status: 200 },
+        );
       }
       const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
       text = json.choices?.[0]?.message?.content ?? "{}";
@@ -118,7 +131,10 @@ export async function POST() {
       });
       if (!res.ok) {
         const err = await res.text();
-        return Response.json({ ok: false, demo: true, alphas: [], message: err.slice(0, 240) }, { status: 200 });
+        return Response.json(
+          { ok: true, demo: true, alphas: mockPropose(offset, 4), message: err.slice(0, 240) },
+          { status: 200 },
+        );
       }
       const json = (await res.json()) as { content?: { type: string; text?: string }[] };
       text = json.content?.find((c) => c.type === "text")?.text ?? "{}";
@@ -128,18 +144,26 @@ export async function POST() {
     const end = text.lastIndexOf("}");
     const payload = JSON.parse(start >= 0 ? text.slice(start, end + 1) : "{}") as Payload;
     const alphas = sanitize(payload);
+    if (alphas.length === 0) {
+      return Response.json({
+        ok: true,
+        demo: true,
+        alphas: mockPropose(offset, 4),
+        message: "LLM output failed parse · mock fallback",
+      });
+    }
     return Response.json({
-      ok: alphas.length > 0,
+      ok: true,
       demo: false,
       alphas,
-      message: alphas.length ? `accepted ${alphas.length} parseable formulas` : "LLM output failed parse",
+      message: `accepted ${alphas.length} parseable formulas`,
     });
   } catch (err) {
     return Response.json({
-      ok: false,
+      ok: true,
       demo: true,
-      alphas: [],
-      message: err instanceof Error ? err.message : "propose failed",
+      alphas: mockPropose(offset, 4),
+      message: err instanceof Error ? err.message : "propose failed · mock fallback",
     });
   }
 }
