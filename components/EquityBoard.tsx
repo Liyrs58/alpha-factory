@@ -1,4 +1,4 @@
-"use client";
+use client";
 
 import { useMemo, useRef, useState } from "react";
 import { clsx, fmtNum, fmtPct } from "@/lib/format";
@@ -125,7 +125,10 @@ export function EquityBoard({
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[4px] border border-line bg-[#16181f]">
-      <header className="flex items-center justify-between border-b border-line px-3 py-1.5 font-formula text-[10px] tracking-wide text-mute">
+      <header
+        data-equity-header
+        className="flex items-center justify-between border-b border-line px-3 py-1.5 font-formula text-[10px] tracking-wide text-mute"
+      >
         <span>
           EQUITY CURVE • {range}
           <span className="ml-2 text-faint">
