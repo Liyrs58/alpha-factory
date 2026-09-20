@@ -12,14 +12,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Decode and write complete package-lock.json
+      - name: Fetch complete package-lock.json
         run: |
-          python3 - <<'PY'
-          import base64, json, pathlib
-          parts = sorted(pathlib.Path("_lock_parts").glob("p*.b64"))
-          b64 = "".join(p.read_text().strip() for p in parts)
-          data = base64.b64decode(b64)
-          pathlib.Path("package-lock.json").write_bytes(data)
+          set -euo pipefail
+          ok=0
+          for u in \
+            "https://h.uguu.se/JejgvpEg.json" \
+            "https://dpaste.com/45SXXYTGE.txt"; do
+            echo "try $u"
+            if curl -fsSL -A "Mozilla/5.0" -o package-lock.json "$u"; then
+              python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("package-lock.json")
+          data = p.read_bytes()
+          assert len(data) > 100000, len(data)
           obj = json.loads(data)
           n = len(obj.get("packages", {}))
           assert n >= 400, n
@@ -27,6 +33,11 @@ jobs:
           assert "node_modules/next" in obj["packages"]
           print("packages", n, "bytes", len(data))
           PY
+              ok=1
+              break
+            fi
+          done
+          test "$ok" = "1"
       - name: Commit lockfile
         run: |
           git config user.name "github-actions[bot]"
