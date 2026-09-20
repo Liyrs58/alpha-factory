@@ -47,11 +47,14 @@ export function AgentStrip({
         <button
           type="button"
           aria-label="Refine factory"
-          onClick={onRefine}
-          disabled={busy}
-          className="shrink-0 self-end border border-ink bg-ink px-3 py-2 font-formula text-[11px] tracking-wide text-paper hover:bg-charcoal disabled:opacity-40 lg:self-center"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRefine();
+          }}
+          className="relative z-40 shrink-0 self-end border border-ink bg-ink px-3 py-2 font-formula text-[11px] tracking-wide text-paper hover:bg-charcoal lg:self-center"
         >
-          {busy ? "RUN…" : "REFINE (R)"}
+          {busy ? "REFINING…" : "REFINE (R)"}
         </button>
       </div>
     </section>
