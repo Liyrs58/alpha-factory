@@ -11,10 +11,15 @@ import { scratchBacktest } from "@/lib/agents/pipeline";
 import { SEED_LIBRARY } from "@/lib/alphas/library";
 import { formatSource, setDelayWindows } from "@/lib/alphas/parser";
 import { UNIVERSE } from "@/lib/data/universe";
-import type { AgentEvent, EvaluatedAlpha, PipelineResult, SeedAlpha } from "@/lib/types";
+import { SESSION_LS_KEY, type LabSession, type StoredRun } from "@/lib/store/types";
+import type { AgentEvent, EvaluatedAlpha, PipelineResult, SeedAlpha, UniverseMeta } from "@/lib/types";
 
 const DELAYS = [1, 5, 14];
-const AS_OF = UNIVERSE.dates[UNIVERSE.dates.length - 1] ?? "";
+const FALLBACK_DATES = UNIVERSE.dates;
+
+function datesOf(r: PipelineResult): string[] {
+  return r.universe?.dates?.length ? r.universe.dates : FALLBACK_DATES;
+}
 
 function factoryNote(next: PipelineResult): string {
   return `factory ${next.evaluated.length} seeds · book ${next.book.selected.map((s) => s.id).join(",")} · Sharpe ${next.book.metrics.sharpe.toFixed(2)}`;
@@ -56,6 +61,26 @@ function mergeSeeds(base: SeedAlpha[], incoming: SeedAlpha[]): SeedAlpha[] {
   return [...map.values()];
 }
 
+function readLocalSession(): LabSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<LabSession>;
+    if (parsed.version !== 1) return null;
+    return {
+      version: 1,
+      savedAt: parsed.savedAt ?? "",
+      extras: Array.isArray(parsed.extras) ? parsed.extras : [],
+      selectedId: parsed.selectedId ?? null,
+      expression: parsed.expression ?? "",
+      llmUsed: Boolean(parsed.llmUsed),
+      runs: Array.isArray(parsed.runs) ? parsed.runs : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 function applyFactory(
   next: PipelineResult,
   setResult: (r: PipelineResult) => void,
@@ -77,7 +102,8 @@ function applyFactory(
     setSelectedId(hero.id);
     setExpr(hero.expression);
   }
-  setLastRun(`${AS_OF} 09:14:32`);
+  const asOf = datesOf(next)[datesOf(next).length - 1] ?? "";
+  setLastRun(`${asOf} 09:14:32`);
   note(factoryNote(next));
 }
 
@@ -91,7 +117,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const [scratchErr, setScratchErr] = useState<string | null>(null);
   const [llmMsg, setLlmMsg] = useState<string | null>(null);
   const [llmBusy, setLlmBusy] = useState(false);
-  const [lastRun, setLastRun] = useState(`${AS_OF} 09:14:32`);
+  const [lastRun, setLastRun] = useState(`${datesOf(initial)[datesOf(initial).length - 1] ?? ""} 09:14:32`);
   const [view, setView] = useState<"alpha" | "book">("alpha");
   const [status, setStatus] = useState(() => factoryNote(initial));
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -102,11 +128,26 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const [pinnedDecile, setPinnedDecile] = useState<{ i: number; v: number } | null>(null);
   const [proposeIdx, setProposeIdx] = useState(0);
   const [statusFlash, setStatusFlash] = useState(false);
+  const [llmMode, setLlmMode] = useState<"mock" | "nvidia">("mock");
+  const [llmModel, setLlmModel] = useState("mock");
+  const [univMeta, setUnivMeta] = useState<UniverseMeta>(
+    initial.universe ?? {
+      source: "DEMO10",
+      nS: UNIVERSE.tickers.length,
+      nT: UNIVERSE.dates.length,
+      dates: UNIVERSE.dates,
+      tickers: UNIVERSE.tickers.map((t) => t.id),
+    },
+  );
+  const [runCount, setRunCount] = useState(0);
   const flashTimer = useRef<number | null>(null);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
+  const resultRef = useRef(result);
+  resultRef.current = result;
   const runGen = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const restored = useRef(false);
 
   const note = useCallback((msg: string) => setStatus(msg), []);
 
@@ -116,6 +157,39 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
     if (flashTimer.current) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setStatusFlash(false), 2400);
   }, []);
+
+  const persist = useCallback(
+    (patch: Partial<Pick<LabSession, "extras" | "selectedId" | "expression" | "llmUsed">>, run?: StoredRun) => {
+      try {
+        const prev = readLocalSession();
+        const next: LabSession = {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          extras: patch.extras ?? prev?.extras ?? extrasFrom(resultRef.current),
+          selectedId: patch.selectedId !== undefined ? patch.selectedId : (prev?.selectedId ?? selectedIdRef.current),
+          expression: patch.expression ?? prev?.expression ?? "",
+          llmUsed: patch.llmUsed ?? prev?.llmUsed ?? false,
+          runs: [...(prev?.runs ?? []), ...(run ? [run] : [])].slice(-48),
+        };
+        localStorage.setItem(SESSION_LS_KEY, JSON.stringify(next));
+        setRunCount(next.runs.length);
+        void fetch("/api/session", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            extras: next.extras,
+            selectedId: next.selectedId,
+            expression: next.expression,
+            llmUsed: next.llmUsed,
+            runs: next.runs,
+          }),
+        });
+      } catch {
+        /* quota / private mode */
+      }
+    },
+    [],
+  );
 
   const compute = useCallback(
     (extras: SeedAlpha[] = [], llmUsed = false, preferId?: string) => {
@@ -148,7 +222,23 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           const next = (await res.json()) as PipelineResult;
           if (gen !== runGen.current) return;
           setBusy(false);
+          if (next.universe) setUnivMeta(next.universe);
           applyFactory(next, setResult, setSelectedId, setExpr, setLastRun, setScratch, note, preferId);
+          persist(
+            {
+              extras: extrasFrom(next),
+              selectedId: preferId ?? next.book.selected[0]?.id ?? null,
+              expression: next.evaluated.find((a) => a.id === preferId)?.expression,
+              llmUsed: next.llmUsed,
+            },
+            {
+              at: new Date().toISOString(),
+              kind: "factory",
+              note: factoryNote(next),
+              extraIds: extrasFrom(next).map((s) => s.id),
+              sharpe: next.book.metrics.sharpe,
+            },
+          );
         } catch (e) {
           if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
             if (gen === runGen.current) {
@@ -163,6 +253,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
             const next = runPipeline(UNIVERSE, extras, llmUsed);
             if (gen !== runGen.current) return;
             setBusy(false);
+            if (next.universe) setUnivMeta(next.universe);
             applyFactory(next, setResult, setSelectedId, setExpr, setLastRun, setScratch, note, preferId);
           } catch (inner) {
             if (gen !== runGen.current) return;
@@ -172,8 +263,71 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
         }
       })();
     },
-    [note],
+    [note, persist],
   );
+
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    void (async () => {
+      try {
+        const flagsRes = await fetch("/api/flags");
+        if (flagsRes.ok) {
+          const flags = (await flagsRes.json()) as {
+            llm?: "mock" | "nvidia" | "live";
+            model?: string;
+          };
+          const nvidia = flags.llm === "nvidia" || flags.llm === "live";
+          setLlmMode(nvidia ? "nvidia" : "mock");
+          setLlmModel(flags.model ?? (nvidia ? "google/gemma-4-31b-it" : "mock"));
+        }
+      } catch {
+        setLlmMode("mock");
+      }
+      try {
+        const uni = await fetch("/api/universe");
+        if (uni.ok) {
+          const json = (await uni.json()) as {
+            meta?: Partial<UniverseMeta> & { start?: string; end?: string };
+          };
+          if (json.meta) {
+            setUnivMeta((m) => ({
+              ...m,
+              source: json.meta?.source === "upload" ? "upload" : (json.meta?.source ?? m.source),
+              nS: json.meta?.nS ?? m.nS,
+              nT: json.meta?.nT ?? m.nT,
+              tickers: json.meta?.tickers ?? m.tickers,
+            }));
+          }
+        }
+      } catch {
+        /* keep SSR meta */
+      }
+      let picked: LabSession | null = readLocalSession();
+      try {
+        const ses = await fetch("/api/session");
+        if (ses.ok) {
+          const server = (await ses.json()) as LabSession;
+          if (!picked) picked = server;
+          else if ((server.extras?.length ?? 0) > 0) {
+            picked = (server.savedAt || "") >= (picked.savedAt || "") ? server : picked;
+          } else if ((picked.extras?.length ?? 0) === 0) {
+            picked = server;
+          }
+        }
+      } catch {
+        /* local only */
+      }
+      if (picked) {
+        setRunCount(picked.runs.length);
+        if (picked.expression) setExpr(picked.expression);
+        if (picked.extras.length > 0) {
+          note(`restore ${picked.extras.length} refined/proposed alphas`);
+          compute(picked.extras, picked.llmUsed, picked.selectedId ?? undefined);
+        }
+      }
+    })();
+  }, [compute, note]);
 
   const rows = useMemo(() => {
     if (!result) return [];
@@ -190,6 +344,9 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const selected = rows.find((a) => a.id === selectedId) ?? rows[0] ?? null;
   const inBook = Boolean(result && selected && result.book.selected.some((s) => s.id === selected.id));
   const cards = selected ? cardsForAlpha(selected, inBook) : [];
+  const chartDates = result ? datesOf(result) : univMeta.dates;
+  const asOf = chartDates[chartDates.length - 1] ?? "";
+  const period = chartDates.length ? `${chartDates[0]} – ${chartDates[chartDates.length - 1]}` : "";
 
   const pushExpr = (next: string) => {
     setUndo((u) => [...u.slice(-24), expr]);
@@ -208,19 +365,50 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   };
 
   const onEval = () => {
-    try {
-      const src = neutralized ? `zscore((${expr}))` : expr;
-      const a = scratchBacktest(UNIVERSE, src);
-      a.expression = expr;
-      setScratch(a);
-      setSelectedId(a.id);
-      setScratchErr(null);
-      setView("alpha");
-      note(`eval Sharpe ${a.metrics.sharpe.toFixed(2)} · IC ${a.metrics.ic.toFixed(3)}`);
-    } catch (e) {
-      setScratchErr(e instanceof Error ? e.message : "eval failed");
-      note(e instanceof Error ? e.message : "eval failed");
-    }
+    void (async () => {
+      try {
+        const src = neutralized ? `zscore((${expr}))` : expr;
+        const res = await fetch("/api/eval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expression: src }),
+        });
+        const json = (await res.json()) as { ok: boolean; alpha?: EvaluatedAlpha; message?: string };
+        if (!json.ok || !json.alpha) throw new Error(json.message ?? "eval failed");
+        const a = json.alpha;
+        a.expression = expr;
+        setScratch(a);
+        setSelectedId(a.id);
+        setScratchErr(null);
+        setView("alpha");
+        note(`eval Sharpe ${a.metrics.sharpe.toFixed(2)} · IC ${a.metrics.ic.toFixed(3)}`);
+        persist(
+          { selectedId: a.id, expression: expr, extras: extrasFrom(result) },
+          {
+            at: new Date().toISOString(),
+            kind: "eval",
+            note: `eval Sharpe ${a.metrics.sharpe.toFixed(2)}`,
+            extraIds: [],
+            sharpe: a.metrics.sharpe,
+          },
+        );
+      } catch (e) {
+        try {
+          const src = neutralized ? `zscore((${expr}))` : expr;
+          const a = scratchBacktest(UNIVERSE, src);
+          a.expression = expr;
+          setScratch(a);
+          setSelectedId(a.id);
+          setScratchErr(null);
+          setView("alpha");
+          note(`eval Sharpe ${a.metrics.sharpe.toFixed(2)} · IC ${a.metrics.ic.toFixed(3)}`);
+        } catch (inner) {
+          const msg = inner instanceof Error ? inner.message : e instanceof Error ? e.message : "eval failed";
+          setScratchErr(msg);
+          note(msg);
+        }
+      }
+    })();
   };
 
   const onStop = () => {
@@ -232,18 +420,22 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   };
 
   const onSave = () => {
+    const extras = extrasFrom(result);
+    persist({ extras, selectedId, expression: expr, llmUsed: result.llmUsed });
     downloadJson("alpha-factory-session.json", {
-      asOf: UNIVERSE.dates[UNIVERSE.dates.length - 1],
+      asOf,
       expression: expr,
       neutralized,
       delay,
+      extras,
       selected: selected
         ? { id: selected.id, metrics: selected.metrics, scores: selected.scores }
         : null,
       book: result?.book.selected.map((s) => ({ id: s.id, expression: s.expression })) ?? [],
       weights: result?.book.weights ?? null,
+      universe: univMeta.source,
     });
-    note("saved alpha-factory-session.json");
+    note("saved session · JSON + store");
   };
 
   const onFormat = () => {
@@ -267,6 +459,40 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
     }
   };
 
+  const onPickCsv = (text: string, name: string) => {
+    void (async () => {
+      note(`upload ${name}…`);
+      try {
+        const res = await fetch("/api/universe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csv: text }),
+        });
+        const json = (await res.json()) as { ok: boolean; meta?: UniverseMeta; message?: string };
+        if (!json.ok || !json.meta) throw new Error(json.message ?? "upload failed");
+        setUnivMeta(json.meta);
+        flash(`universe ${json.meta.nS} names × ${json.meta.nT} days · ${name}`);
+        compute(extrasFrom(result), result.llmUsed, selectedId);
+      } catch (e) {
+        note(e instanceof Error ? e.message : "upload failed");
+      }
+    })();
+  };
+
+  const onResetUniverse = () => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/universe", { method: "DELETE" });
+        const json = (await res.json()) as { ok: boolean; meta?: UniverseMeta };
+        if (json.meta) setUnivMeta(json.meta);
+        flash("universe reset DEMO10");
+        compute(extrasFrom(result), result.llmUsed, selectedId);
+      } catch {
+        note("reset failed");
+      }
+    })();
+  };
+
   const proposeLlm = async () => {
     setLlmBusy(true);
     note("proposer · requesting formulas…");
@@ -279,6 +505,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
       const json = (await res.json()) as {
         ok: boolean;
         demo?: boolean;
+        live?: boolean;
         alphas: SeedAlpha[];
         message?: string;
       };
@@ -290,7 +517,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
       }
       setLlmMsg(json.message ?? `+${json.alphas.length} formulas`);
       const extras = mergeSeeds(extrasFrom(result), json.alphas);
-      compute(extras, !json.demo, json.alphas[0]?.id);
+      compute(extras, Boolean(json.live) || !json.demo, json.alphas[0]?.id);
     } catch {
       setLlmMsg("propose offline");
       note("propose offline");
@@ -313,42 +540,63 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
       result.evaluated.map((a) => a.id),
     );
 
-    let local: EvaluatedAlpha;
-    try {
-      local = scratchBacktest(UNIVERSE, mut.expression);
-    } catch (e) {
-      note(e instanceof Error ? e.message : "refine failed");
-      return;
-    }
-    local.id = id;
-    local.name = `${parent.name} · ${mut.label}`;
-    local.category = parent.category;
-    local.source = parent.source;
-    local.rationale = mut.note;
-    local.parentId = parent.id;
-    local.generation = generation + 1;
-    local.mutation = mut.label;
-    local.expression = mut.expression;
+    const finishLocal = (local: EvaluatedAlpha) => {
+      local.id = id;
+      local.name = `${parent.name} · ${mut.label}`;
+      local.category = parent.category;
+      local.source = parent.source;
+      local.rationale = mut.note;
+      local.parentId = parent.id;
+      local.generation = generation + 1;
+      local.mutation = mut.label;
+      local.expression = mut.expression;
 
-    const optimistic: PipelineResult = {
-      ...result,
-      evaluated: [local, ...result.evaluated.filter((x) => x.id !== id)],
-      proposed: [...result.proposed.filter((p) => p.id !== id), toSeed(local)],
+      const optimistic: PipelineResult = {
+        ...result,
+        evaluated: [local, ...result.evaluated.filter((x) => x.id !== id)],
+        proposed: [...result.proposed.filter((p) => p.id !== id), toSeed(local)],
+      };
+      setResult(optimistic);
+      setScratch(null);
+      setSelectedId(id);
+      setExpr(mut.expression);
+      setAgent("critic");
+      setFilter("all");
+      setView("alpha");
+      setBusy(false);
+      flash(
+        `refine ${parent.id} → ${id} · ${mut.label} · Sharpe ${local.metrics.sharpe.toFixed(2)} · ${parent.expression} ⇒ ${mut.expression}`,
+      );
+      persist(
+        {
+          extras: extrasFrom(optimistic),
+          selectedId: id,
+          expression: mut.expression,
+          llmUsed: result.llmUsed,
+        },
+        {
+          at: new Date().toISOString(),
+          kind: "refine",
+          note: `refine ${parent.id} → ${id} · ${mut.label}`,
+          extraIds: [id],
+          selectedId: id,
+          sharpe: local.metrics.sharpe,
+        },
+      );
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-alpha-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+      });
     };
-    setResult(optimistic);
-    setScratch(null);
-    setSelectedId(id);
-    setExpr(mut.expression);
-    setAgent("critic");
-    setFilter("all");
-    setView("alpha");
-    setBusy(false);
-    flash(
-      `refine ${parent.id} → ${id} · ${mut.label} · Sharpe ${local.metrics.sharpe.toFixed(2)} · ${parent.expression} ⇒ ${mut.expression}`,
-    );
-    requestAnimationFrame(() => {
-      document.querySelector(`[data-alpha-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
-    });
+
+    try {
+      const local = scratchBacktest(UNIVERSE, mut.expression);
+      if (univMeta.source === "DEMO10") finishLocal(local);
+    } catch (e) {
+      if (univMeta.source === "DEMO10") {
+        note(e instanceof Error ? e.message : "refine failed");
+        return;
+      }
+    }
 
     abortRef.current?.abort();
     const ac = new AbortController();
@@ -371,16 +619,23 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
         };
         if (gen !== runGen.current || !json.ok) return;
         setResult(json.result);
+        if (json.result.universe) setUnivMeta(json.result.universe);
         const stillOnChild = selectedIdRef.current === id || selectedIdRef.current === json.child.id;
         if (stillOnChild) {
           setSelectedId(json.child.id);
           setExpr(json.child.expression);
         }
+        persist({
+          extras: extrasFrom(json.result),
+          selectedId: json.child.id,
+          expression: json.child.expression,
+          llmUsed: json.result.llmUsed,
+        });
       } catch {
         /* local rewrite already visible */
       }
     })();
-  }, [flash, note, result, selected]);
+  }, [flash, note, persist, result, selected, univMeta.source]);
 
   const onAgent = (who: AgentEvent["agent"]) => {
     setAgent(who);
@@ -429,14 +684,13 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, selectedId, compute, expr, selected, result, onRefine]);
 
-  const period = `${UNIVERSE.dates[0]} – ${UNIVERSE.dates[UNIVERSE.dates.length - 1]}`;
-  const asOf = UNIVERSE.dates[UNIVERSE.dates.length - 1];
   const chartEquity =
     view === "book" && result ? result.book.equity : (selected?.equity ?? [1]);
   const chartMetrics =
     view === "book" && result ? result.book.metrics : selected?.metrics;
   const chartLabel =
     view === "book" ? "BOOK composite" : selected ? `ALP-${selected.id}` : "—";
+  const univLabel = univMeta.source === "DEMO10" ? "DEMO10" : `UPLOAD ${univMeta.nS}`;
 
   return (
     <div className="flex min-h-dvh flex-col bg-charcoal text-paper md:h-dvh md:overflow-hidden">
@@ -457,9 +711,15 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
         <div className="hidden font-formula text-[11px] text-mute md:block">
           WORKSPACE: quant_research
           <span className="mx-2 text-faint">|</span>
-          UNIVERSE: DEMO10
+          UNIVERSE: {univLabel}
           <span className="mx-2 text-faint">|</span>
           DATE: {asOf}
+          {runCount > 0 && (
+            <>
+              <span className="mx-2 text-faint">|</span>
+              HIST {runCount}
+            </>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-2">
           {llmMsg && (
@@ -493,7 +753,20 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           >
             F9 SAVE
           </button>
-          <span className="px-2 py-1 font-formula text-[11px] text-mute">demo</span>
+          <span
+            aria-label={llmMode === "nvidia" ? "NVIDIA" : "MOCK"}
+            title={
+              llmMode === "nvidia"
+                ? `NVIDIA NIM ${llmModel}`
+                : "deterministic mock (no NVIDIA_API_KEY)"
+            }
+            className={`px-2 py-1 font-formula text-[11px] ${llmMode === "nvidia" ? "text-signal" : "text-mute"}`}
+          >
+            {llmMode === "nvidia" ? "NVIDIA" : "MOCK"}
+          </span>
+          <span className="px-2 py-1 font-formula text-[11px] text-faint" title="orders disabled">
+            LIVE_TRADING=off
+          </span>
         </div>
       </header>
       <div
@@ -538,6 +811,9 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
             note(`neutralized → ${!neutralized ? "yes" : "no"}`);
           }}
           onCycleDelay={onCycleDelay}
+          universeLabel={univLabel}
+          onPickCsv={onPickCsv}
+          onResetUniverse={onResetUniverse}
         />
 
         <AgentStrip
@@ -598,7 +874,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
                   </div>
                   <EquityBoard
                     equity={chartEquity}
-                    dates={UNIVERSE.dates}
+                    dates={chartDates}
                     metrics={chartMetrics}
                     label={chartLabel}
                     onNotice={note}
