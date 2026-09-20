@@ -70,7 +70,7 @@ Status line under the header should change after every action. No dead buttons.
 ### Results + chart
 - [ ] Click a table row (`data-alpha-id`): editor, agent notes, deciles, and equity follow that alpha.
 - [ ] Decile bar → `D# … bps`.
-- [ ] **1Y / 3Y / 5Y / 10Y / ALL** change the window label (10Y: *clamped to sample*). Buttons sit above the SVG (not covered by the chart).
+- [ ] **1Y / 3Y / 5Y / 10Y / ALL** sit in the equity header (above the SVG). Status + `EQUITY CURVE •` label change. 10Y: *clamped to sample*.
 - [ ] Hover equity for date + return. **EXPORT PNG**.
 
 Keys: `F5` factory · `r` refine · `F9` save · `j/k` rows · `⌃↵` eval.
