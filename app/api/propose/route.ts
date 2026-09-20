@@ -1,5 +1,7 @@
 import { parse } from "@/lib/alphas/parser";
 import { mockPropose } from "@/lib/agents/propose-mock";
+import { isLiveLlm } from "@/lib/flags";
+import { extractJsonObject, nimChat, nvidiaModel } from "@/lib/llm/nvidia";
 import type { Category, SeedAlpha } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -48,7 +50,7 @@ function sanitize(raw: Payload): SeedAlpha[] {
       category,
       expression,
       source: "llm",
-      rationale: (a.rationale ?? "LLM proposed").slice(0, 180),
+      rationale: (a.rationale ?? "NIM proposed").slice(0, 180),
     });
   }
   return out.slice(0, 6);
@@ -63,105 +65,65 @@ export async function POST(req: Request) {
     offset = 0;
   }
 
-  const openai = process.env.OPENAI_API_KEY;
-  const anthropic = process.env.ANTHROPIC_API_KEY;
-
-  if (!openai && !anthropic) {
+  if (!isLiveLlm()) {
     const alphas = mockPropose(offset, 4);
     return Response.json({
       ok: true,
       demo: true,
+      live: false,
+      provider: "mock",
       alphas,
       message: `mock LLM · ${alphas.map((a) => a.id).join(",")}`,
     });
   }
 
-  try {
-    let text = "";
-    if (openai) {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${openai}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-          temperature: 0.7,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: SYSTEM },
-            {
-              role: "user",
-              content:
-                "Propose 4 new formulaic alphas for a 10-name synthetic US-style universe. Avoid duplicating close-delay(close,14) and sma(close,20)-close.",
-            },
-          ],
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        return Response.json(
-          { ok: true, demo: true, alphas: mockPropose(offset, 4), message: err.slice(0, 240) },
-          { status: 200 },
-        );
-      }
-      const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      text = json.choices?.[0]?.message?.content ?? "{}";
-    } else if (anthropic) {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": anthropic,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5-20250929",
-          max_tokens: 1200,
-          system: SYSTEM,
-          messages: [
-            {
-              role: "user",
-              content:
-                "Propose 4 new formulaic alphas for a 10-name synthetic US-style universe. JSON only.",
-            },
-          ],
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        return Response.json(
-          { ok: true, demo: true, alphas: mockPropose(offset, 4), message: err.slice(0, 240) },
-          { status: 200 },
-        );
-      }
-      const json = (await res.json()) as { content?: { type: string; text?: string }[] };
-      text = json.content?.find((c) => c.type === "text")?.text ?? "{}";
-    }
+  const nim = await nimChat({
+    system: SYSTEM,
+    user: "Propose 4 new formulaic alphas for a 10-name synthetic US-style universe. Avoid duplicating close-delay(close,14) and sma(close,20)-close. JSON only.",
+    temperature: 0.7,
+    maxTokens: 1200,
+  });
 
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    const payload = JSON.parse(start >= 0 ? text.slice(start, end + 1) : "{}") as Payload;
+  if (!nim.ok) {
+    const alphas = mockPropose(offset, 4);
+    return Response.json({
+      ok: true,
+      demo: true,
+      live: false,
+      provider: "mock",
+      alphas,
+      message: `${nim.message} · mock fallback`,
+    });
+  }
+
+  try {
+    const payload = JSON.parse(extractJsonObject(nim.text)) as Payload;
     const alphas = sanitize(payload);
     if (alphas.length === 0) {
       return Response.json({
         ok: true,
         demo: true,
+        live: false,
+        provider: "mock",
         alphas: mockPropose(offset, 4),
-        message: "LLM output failed parse · mock fallback",
+        message: "NIM output failed parse · mock fallback",
       });
     }
     return Response.json({
       ok: true,
       demo: false,
+      live: true,
+      provider: "nvidia",
+      model: nvidiaModel(),
       alphas,
-      message: `accepted ${alphas.length} parseable formulas`,
+      message: `NIM ${nvidiaModel()} · ${alphas.length} formulas`,
     });
   } catch (err) {
     return Response.json({
       ok: true,
       demo: true,
+      live: false,
+      provider: "mock",
       alphas: mockPropose(offset, 4),
       message: err instanceof Error ? err.message : "propose failed · mock fallback",
     });

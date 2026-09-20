@@ -110,12 +110,21 @@ export type AgentEvent = {
   tone?: "pass" | "fail" | "info";
 };
 
+export type UniverseMeta = {
+  source: "DEMO10" | "upload";
+  nS: number;
+  nT: number;
+  dates: string[];
+  tickers: string[];
+};
+
 export type PipelineResult = {
   proposed: SeedAlpha[];
   evaluated: EvaluatedAlpha[];
   book: Book;
   events: AgentEvent[];
   llmUsed: boolean;
+  universe: UniverseMeta;
 };
 
 export type Stage = "propose" | "filter" | "backtest" | "book";
