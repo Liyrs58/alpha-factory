@@ -9,10 +9,13 @@
     "dev": "next dev --port 4731",
     "build": "next build",
     "start": "next start --port 4731",
-    "lint": "eslint",
+    "lint": "eslint .",
     "selftest": "npx tsx lib/selftest.ts",
     "ensure:pitch": "node scripts/ensure-investor-pitch.cjs",
-    "prebuild": "node scripts/ensure-investor-pitch.cjs"
+    "prebuild": "node scripts/ensure-investor-pitch.cjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "experiment:historical": "npx tsx scripts/run-historical-experiment.ts"
   },
   "dependencies": {
     "@vercel/blob": "^2.3.1",
@@ -29,6 +32,7 @@
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
     "tsx": "^4.20.5",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }
