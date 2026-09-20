@@ -1,12 +1,16 @@
 # Alpha Factory
 
-A **quant alpha discovery lab** — a charcoal+paper research IDE that runs the paper’s **proposer → critic → backtester → PM** loop on a shipped OHLCV sample.
+Quant alpha discovery lab: proposer → critic → backtester → PM on a shipped OHLCV sample. Formulaic DSL alphas, REFINE loop, offline mock LLM (optional NVIDIA NIM).
 
-Best use case: sit in the notebook, emit formulaic alphas (DSL), gate them (CSA/RPA), backtest long-short books, and iterate with **REFINE**. Works **offline with zero API keys** (deterministic mock LLM). Optional live proposer/critic uses **NVIDIA NIM** (`NVIDIA_API_KEY` → `google/gemma-4-31b-it` at `https://integrate.api.nvidia.com/v1`). No OpenAI or Anthropic keys.
+<video src="https://egqayuigreupgfhv.public.blob.vercel-storage.com/alpha/investor-pitch.mp4" controls width="720"></video>
 
-Inspired by Kou et al., *Automate Strategy Finding with LLM in Quant Investment*, Findings of EMNLP 2025 ([arXiv:2409.06289](https://arxiv.org/abs/2409.06289) · [ACL](https://aclanthology.org/2025.findings-emnlp.1005/)) and [kouzhizhuo/Automate-Strategy-Finding-with-LLM-in-Quant-investment](https://github.com/kouzhizhuo/Automate-Strategy-Finding-with-LLM-in-Quant-investment).
+[Watch investor pitch (~35s)](docs/demo/investor-pitch.mp4) · also served at `/demo/investor-pitch.mp4`
 
-This is an **executable slice** of that protocol, not a byte-for-byte SSE50 / 3-layer MLP reproduction. See [Real vs stub](#real-vs-stub).
+**Live:** [https://alpha-factory-ten.vercel.app](https://alpha-factory-ten.vercel.app)
+
+Paper-only. `LIVE_TRADING` is hard-false forever. Optional Alpaca paper submit is explicit and off by default.
+
+---
 
 ## Run
 
