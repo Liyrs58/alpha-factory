@@ -44,3 +44,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# lab session / uploaded OHLCV (local + /tmp fallback)
+/data/*.json
+!/data/.gitkeep
