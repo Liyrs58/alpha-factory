@@ -71,7 +71,7 @@ export function universeFromCsv(text: string): CsvParseOk | CsvParseError {
     byName.set(ticker, list);
   }
 
-  if (byName.size < 2) return { ok: false, message: `need ≥2 tickers` };
+  if (byName.size < 2) return { ok: false, message: "need ≥2 tickers" };
   if (byName.size > MAX_NAMES) return { ok: false, message: `too many tickers (${byName.size})` };
 
   const dateSet = new Set<string>();
