@@ -26,7 +26,7 @@ export function cardsForAlpha(a: EvaluatedAlpha, bookKept: boolean): AgentCard[]
       title: "CRITIC",
       latency: "120ms",
       body: a.mutation
-        ? `${a.mutation}. θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)} |IC|=${fmtNum(Math.abs(m.ic), 3)}. ${a.scores.passed ? "Clears τ after rewrite." : "Still below τ; keep iterating."}`
+        ? `REWRITE ${a.parentId} → ${a.id}: ${a.mutation}. New formula ${a.expression}. θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)}. ${a.scores.passed ? "Clears τ after rewrite." : "Still below τ; keep iterating."}`
         : bookKept
           ? `θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)}. Turnover may spike on volume shocks. Consider vol filter or ADV cap to improve robustness.`
           : `Below gate τ. θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)} |IC|=${fmtNum(Math.abs(m.ic), 3)}. Category slot filled by a higher-scoring seed.`,
