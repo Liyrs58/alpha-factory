@@ -1,0 +1,29 @@
+name: Embed investor pitch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/pitch-video.url"
+      - "scripts/ensure-investor-pitch.cjs"
+      - "scripts/ensure-investor-pitch.mjs"
+      - ".github/workflows/embed-investor-pitch.yml"
+permissions:
+  contents: write
+jobs:
+  embed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pitch video
+        run: node scripts/ensure-investor-pitch.cjs
+      - name: Commit if new
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/demo/investor-pitch.mp4 docs/demo/investor-pitch.mp4 || true
+          if git diff --cached --quiet; then
+            echo "No video changes"
+          else
+            git commit -m "Add investor-pitch.mp4 to public/demo and docs/demo"
+            git push
+          fi
