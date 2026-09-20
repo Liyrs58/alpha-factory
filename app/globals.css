@@ -64,6 +64,14 @@ button {
   font: inherit;
 }
 
+/* Next.js 16 still mounts a portal even with devIndicators:false; it stole row/decile clicks. */
+nextjs-portal,
+[data-next-badge-root],
+[data-nextjs-dev-overlay],
+[data-nextjs-toast] {
+  pointer-events: none !important;
+}
+
 .lab-grid {
   background-image:
     linear-gradient(to right, #2c303a 1px, transparent 1px),
