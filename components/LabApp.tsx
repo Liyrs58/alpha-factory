@@ -495,7 +495,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
 
   const proposeLlm = async () => {
     setLlmBusy(true);
-    note("proposer · requesting formulas…");
+    note("proposer · NVIDIA google/gemma-4-31b-it stream (cold start up to 3 min)…");
     try {
       const res = await fetch("/api/propose", {
         method: "POST",

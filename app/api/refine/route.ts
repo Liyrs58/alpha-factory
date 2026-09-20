@@ -9,6 +9,8 @@ import { upsertSession } from "@/lib/store/session";
 import type { SeedAlpha } from "@/lib/types";
 
 export const runtime = "nodejs";
+/** NIM cold start ~2 min; keep the route alive for the stream. */
+export const maxDuration = 180;
 
 const CRITIC_SYSTEM = `You rewrite one formulaic alpha. Return JSON only:
 {"expression":string,"label":string,"note":string}

@@ -38,12 +38,12 @@ NVIDIA_API_KEY=
 LIVE_TRADING=false
 ```
 
-Get a `nvapi-…` key at [build.nvidia.com/settings](https://build.nvidia.com/settings). The app calls `https://integrate.api.nvidia.com/v1/chat/completions` with **`google/gemma-4-31b-it` only** (not overridable). Empty key keeps the mock. Do not commit `.env.local`.
+Get a `nvapi-…` key at [build.nvidia.com/settings](https://build.nvidia.com/settings). The app **streams** `POST https://integrate.api.nvidia.com/v1/chat/completions` with **`google/gemma-4-31b-it` only** (`stream: true`, 180s timeout for ~2 min cold start). Empty key keeps the mock. Do not commit `.env.local`.
 
 | Keys | Proposer (LLM button) | Critic (REFINE) | Header badge |
 | --- | --- | --- | --- |
 | none | mock formulas `M01`–`M08` | deterministic AST rewrite (window, zscore, volume residual, sign, vol-scale) | **MOCK** |
-| `NVIDIA_API_KEY` | NIM `google/gemma-4-31b-it`, parse-checked DSL | NIM rewrite, mock fallback if output does not parse | **NVIDIA** |
+| `NVIDIA_API_KEY` | NIM `google/gemma-4-31b-it` SSE stream, parse-checked DSL | NIM rewrite stream, mock fallback if output does not parse | **NVIDIA** |
 
 `LIVE_TRADING` is hard-false in code. A `PAPER_BROKER` interface is stubbed (commented Alpaca paper sketch) and never submits orders.
 
@@ -97,7 +97,7 @@ First deploy succeeds with zero environment variables. Local port `4731` is only
 | Backtest Sharpe / drawdown / equity / IC / IR / deciles | **Real** on seeded DEMO10 (or uploaded CSV) |
 | CSA/RPA critic scores and τ gate | **Real** (paper weights; not their SSE50 numbers) |
 | REFINE rewrite + re-backtest | **Real** (deterministic critic; NIM critic if `NVIDIA_API_KEY` is set) |
-| LLM proposer | **Real** with `NVIDIA_API_KEY` (NIM `google/gemma-4-31b-it`); **mock** otherwise (`M01`–`M08`) |
+| LLM proposer | **Real** with `NVIDIA_API_KEY` (NIM `google/gemma-4-31b-it`, `stream: true`, 180s timeout); **mock** otherwise (`M01`–`M08`) |
 | Session / refine history | **Real** JSON store + localStorage |
 | Book combiner | **Stub vs paper**: ridge+IC by regime, not the 3-layer MLP |
 | Universe | **Stub vs paper**: synthetic DEMO10 default, not SSE50; optional CSV replace |

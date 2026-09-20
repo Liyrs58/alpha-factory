@@ -7,7 +7,7 @@ import { criticRewrite } from "./agents/mutate";
 import { mockPropose } from "./agents/propose-mock";
 import { runPipeline, scratchBacktest } from "./agents/pipeline";
 import { LIVE_TRADING, PAPER_BROKER, llmProvider } from "./flags";
-import { extractJsonObject, NIM_MODEL } from "./llm/nvidia";
+import { extractJsonObject, appendSsePayload, NIM_MODEL, NIM_TIMEOUT_MS } from "./llm/nvidia";
 import { emptySession, loadSession, upsertSession } from "./store/session";
 
 function assert(cond: unknown, msg: string) {
@@ -69,6 +69,16 @@ function main() {
   assert(PAPER_BROKER.enabled === false, "paper broker disabled");
   assert(llmProvider() === "mock", "default LLM is mock without NVIDIA_API_KEY");
   assert(NIM_MODEL === "google/gemma-4-31b-it", "NIM model locked to gemma-4-31b-it");
+  assert(NIM_TIMEOUT_MS >= 180_000, "NIM timeout must cover ~2 min cold start");
+  assert(
+    appendSsePayload("", '{"choices":[{"delta":{"content":"hel"}}]}') === "hel",
+    "SSE delta content",
+  );
+  assert(
+    appendSsePayload("hel", '{"choices":[{"delta":{"content":"lo"}}]}') === "hello",
+    "SSE delta concat",
+  );
+  assert(appendSsePayload("hello", "[DONE]") === "hello", "SSE done is a no-op");
   const extracted = extractJsonObject('noise ```json\n{"expression":"rank(close)"}\n```');
   assert(extracted.includes("rank(close)"), "NIM json fence extract");
 

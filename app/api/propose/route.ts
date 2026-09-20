@@ -5,6 +5,8 @@ import { extractJsonObject, nimChat, nvidiaModel } from "@/lib/llm/nvidia";
 import type { Category, SeedAlpha } from "@/lib/types";
 
 export const runtime = "nodejs";
+/** NIM cold start ~2 min; keep the route alive for the stream. */
+export const maxDuration = 180;
 
 const SYSTEM = `You emit formulaic alpha factors for a cross-sectional equity book.
 Return JSON only: {"alphas":[{"name":string,"category":"momentum"|"meanrev"|"volatility"|"liquidity"|"technical"|"quality","expression":string,"rationale":string}]}
