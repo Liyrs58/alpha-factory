@@ -111,11 +111,16 @@ export type AgentEvent = {
 };
 
 export type UniverseMeta = {
-  source: "DEMO10" | "upload";
+  /** DEMO10 = forever SYNTHETIC; historical = downloaded OHLCV; upload = user CSV. */
+  source: "DEMO10" | "historical" | "upload";
   nS: number;
   nT: number;
   dates: string[];
   tickers: string[];
+  /** Human label for UI: SYNTHETIC DEMO | HISTORICAL OOS | UPLOAD */
+  label?: string;
+  synthetic?: boolean;
+  provider?: string;
 };
 
 export type PipelineResult = {
