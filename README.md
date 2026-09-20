@@ -94,7 +94,7 @@ Optional Production/Preview env (all free-tier; no paid APIs):
 | `AUTH_SECRET` | Signs the gate cookie (recommended when gated) |
 | `PAPER_BROKER` | `off` (default) or `alpaca` |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | Alpaca **paper** account + optional Paper submit |
-| `ALPACA_BASE_URL` | Optional; default `https://paper-api.alpaca.markets`; live URLs refused |
+| `ALPACA_BASE_URL` | Must be `https://paper-api.alpaca.markets`; live URLs refused |
 | `LIVE_TRADING` | Ignored; hard-false in code |
 
 Leave everything unset for the same offline mock as local. Server JSON on Vercel is ephemeral `/tmp` unless Blob is configured; the browser store still keeps refine history.

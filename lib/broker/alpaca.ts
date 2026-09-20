@@ -104,23 +104,25 @@ export function isLiveAlpacaUrl(raw: string): boolean {
   return false;
 }
 
+/** Only https://paper-api.alpaca.markets is allowed. */
+export function isAllowedPaperBase(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" && u.hostname.toLowerCase() === "paper-api.alpaca.markets";
+  } catch {
+    return false;
+  }
+}
+
 export function paperBaseUrl(): { ok: true; url: string } | { ok: false; reason: string } {
   const raw = (process.env.ALPACA_BASE_URL?.trim() || PAPER_API_DEFAULT).replace(/\/+$/, "");
   if (LIVE_TRADING) {
     return { ok: false, reason: "LIVE_TRADING=false · refuse live trading" };
   }
-  if (isLiveAlpacaUrl(raw)) {
-    return { ok: false, reason: `LIVE_TRADING=false · refuse live Alpaca URL (${raw})` };
+  if (isLiveAlpacaUrl(raw) || !isAllowedPaperBase(raw)) {
+    return { ok: false, reason: `LIVE_TRADING=false · paper-api.alpaca.markets only (${raw})` };
   }
-  try {
-    const u = new URL(raw);
-    if (u.protocol !== "https:" && u.hostname !== "localhost" && u.hostname !== "127.0.0.1") {
-      return { ok: false, reason: "paper Alpaca URL must be https" };
-    }
-    return { ok: true, url: `${u.protocol}//${u.host}` };
-  } catch {
-    return { ok: false, reason: "invalid ALPACA_BASE_URL" };
-  }
+  return { ok: true, url: PAPER_API_DEFAULT };
 }
 
 /**
@@ -164,6 +166,16 @@ async function saveLedger(next: PaperLedger): Promise<PaperLedger> {
   return clipped;
 }
 
+async function paperFetch(path: string, init: RequestInit): Promise<Response> {
+  const base = paperBaseUrl();
+  if (!base.ok) throw new Error(base.reason);
+  const url = `${base.url}${path.startsWith("/") ? path : `/${path}`}`;
+  if (new URL(url).hostname !== "paper-api.alpaca.markets") {
+    throw new Error("LIVE_TRADING=false · refuse non-paper Alpaca host");
+  }
+  return fetch(url, init);
+}
+
 function alpacaHeaders(): HeadersInit {
   return {
     "APCA-API-KEY-ID": alpacaKey() ?? "",
@@ -202,11 +214,8 @@ export async function readPaperAccount(): Promise<
     return { ok: true, account: sim };
   }
 
-  const base = paperBaseUrl();
-  if (!base.ok) return { ok: false, reason: base.reason, account: sim };
-
   try {
-    const res = await fetch(`${base.url}/v2/account`, {
+    const res = await paperFetch("/v2/account", {
       headers: alpacaHeaders(),
       cache: "no-store",
     });
@@ -278,10 +287,8 @@ export async function submitPaperOrder(
   }
 
   if (useAlpaca) {
-    const base = paperBaseUrl();
-    if (!base.ok) return { ok: false, reason: base.reason };
     try {
-      const res = await fetch(`${base.url}/v2/orders`, {
+      const res = await paperFetch("/v2/orders", {
         method: "POST",
         headers: alpacaHeaders(),
         body: JSON.stringify({

@@ -19,6 +19,7 @@ export async function GET() {
     ok: acc.ok,
     liveTrading: LIVE_TRADING,
     mode: paperMode(),
+    base: "https://paper-api.alpaca.markets",
     account: acc.account,
     message: acc.ok ? undefined : acc.reason,
   });

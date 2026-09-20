@@ -9,7 +9,7 @@ import {
   paperEnabled,
   paperMode,
   paperBrokerEnv,
-  paperBaseUrl,
+  alpacaKeysReady,
   submitPaperOrder,
   type PaperFill,
   type PaperOrder,
@@ -57,7 +57,6 @@ export const PAPER_BROKER: PaperBroker = {
 
 export function publicFlags() {
   const mode = paperMode();
-  const base = paperBaseUrl();
   return {
     liveTrading: LIVE_TRADING,
     llm: isLiveLlm() ? ("nvidia" as const) : ("mock" as const),
@@ -75,8 +74,8 @@ export function publicFlags() {
       mode,
       enabled: paperEnabled(),
       live: LIVE_TRADING,
-      base: mode === "alpaca" && base.ok ? base.url : PAPER_API_DEFAULT,
-      keys: mode === "alpaca",
+      base: PAPER_API_DEFAULT,
+      keys: alpacaKeysReady(),
     },
   };
 }

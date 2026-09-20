@@ -17,9 +17,12 @@ import {
   verifyGateCookie,
 } from "./auth";
 import {
+  alpacaKeysReady,
+  isAllowedPaperBase,
   isLiveAlpacaUrl,
   paperBaseUrl,
   paperMode,
+  readPaperAccount,
   symbolAllowedOnAlpaca,
   submitPaperOrder,
 } from "./broker/alpaca";
@@ -101,10 +104,14 @@ async function main() {
   assert(isLiveAlpacaUrl("https://api.alpaca.markets"), "live alpaca host");
   assert(isLiveAlpacaUrl("https://api.alpaca.markets/v2"), "live alpaca path");
   assert(!isLiveAlpacaUrl("https://paper-api.alpaca.markets"), "paper alpaca host");
+  assert(isAllowedPaperBase("https://paper-api.alpaca.markets"), "paper base allowed");
+  assert(!isAllowedPaperBase("https://api.alpaca.markets"), "live base not allowed");
   const prevBase = process.env.ALPACA_BASE_URL;
   process.env.ALPACA_BASE_URL = "https://api.alpaca.markets";
   const liveBase = paperBaseUrl();
   assert(!liveBase.ok, "refuse live Alpaca URL");
+  process.env.ALPACA_BASE_URL = "https://broker-app.alpaca.markets";
+  assert(!paperBaseUrl().ok, "refuse non-paper alpaca host");
   if (prevBase === undefined) delete process.env.ALPACA_BASE_URL;
   else process.env.ALPACA_BASE_URL = prevBase;
   const paperBase = paperBaseUrl();
@@ -124,6 +131,17 @@ async function main() {
   if (prevBroker === undefined) delete process.env.PAPER_BROKER;
   else process.env.PAPER_BROKER = prevBroker;
   assert(paperMode() === "off", "paper mode restored off");
+
+  if (alpacaKeysReady()) {
+    const prevPing = process.env.PAPER_BROKER;
+    process.env.PAPER_BROKER = "alpaca";
+    const acc = await readPaperAccount();
+    assert(acc.ok, acc.ok ? "paper account" : acc.reason);
+    assert(acc.account.source === "alpaca", "paper account source");
+    assert(String(acc.account.status).toUpperCase() === "ACTIVE", "paper account ACTIVE");
+    if (prevPing === undefined) delete process.env.PAPER_BROKER;
+    else process.env.PAPER_BROKER = prevPing;
+  }
 
   const legs = researchBookOrders(UNIVERSE, result.book, 1);
   assert(legs.length === 4, "research book top-4 longs");
@@ -153,6 +171,8 @@ async function main() {
   assert(flags.auth.required === false, "flags auth.required");
   assert(flags.llm === "mock", "flags llm badge mock");
   assert(flags.paper.broker === "off", "flags paper off");
+  assert(flags.paper.keys === false, "flags paper keys unset");
+  assert(flags.paper.base === "https://paper-api.alpaca.markets", "flags paper base");
 
   const csv = universeFromCsv(sampleCsv());
   assert(csv.ok, "csv parse");
