@@ -36,6 +36,12 @@ Copy `.env.example` (or `env.example`) to `.env.local`:
 ```
 NVIDIA_API_KEY=
 LIVE_TRADING=false
+BLOB_READ_WRITE_TOKEN=
+DEMO_ACCESS_CODE=
+AUTH_SECRET=
+PAPER_BROKER=off
+ALPACA_API_KEY=
+ALPACA_API_SECRET=
 ```
 
 Get a `nvapi-…` key at [build.nvidia.com/settings](https://build.nvidia.com/settings). The app **streams** `POST https://integrate.api.nvidia.com/v1/chat/completions` with **`google/gemma-4-31b-it` only** (`stream: true`, 180s timeout for ~2 min cold start). Empty key keeps the mock. Do not commit `.env.local`.
@@ -45,20 +51,27 @@ Get a `nvapi-…` key at [build.nvidia.com/settings](https://build.nvidia.com/se
 | none | mock formulas `M01`–`M08` | deterministic AST rewrite (window, zscore, volume residual, sign, vol-scale) | **MOCK** |
 | `NVIDIA_API_KEY` | NIM `google/gemma-4-31b-it` SSE stream, parse-checked DSL | NIM rewrite stream, mock fallback if output does not parse | **NVIDIA** |
 
-`LIVE_TRADING` is hard-false in code. A `PAPER_BROKER` interface is stubbed (commented Alpaca paper sketch) and never submits orders.
+`LIVE_TRADING` is hard-false in code **forever**. The app never sends live brokerage orders.
+
+Optional **Alpaca paper** (research book only): `PAPER_BROKER=alpaca` plus `ALPACA_API_KEY` / `ALPACA_API_SECRET`. Default base `https://paper-api.alpaca.markets`. Live hosts (`api.alpaca.markets`) are refused. Without keys, `PAPER_BROKER=alpaca` uses an offline simulator. Orders are **never** placed on REFINE — only from the explicit **Paper submit** control in Settings (optional symbol, else last-session top-4 research-book longs). DEMO10 synthetic ids are never sent to Alpaca.
 
 ## Persistence
 
 REFINE / LLM extras survive reload:
 
 - Browser `localStorage` key `alpha-factory-session-v1`
-- Server JSON `data/lab-session.json` (writable `/tmp/alpha-factory-lab-session.json` on Vercel)
+- Server JSON via `@vercel/blob` when `BLOB_READ_WRITE_TOKEN` is set (`store.durable=true`)
+- Fallback ephemeral `data/lab-session.json` (writable `/tmp/alpha-factory-lab-session.json` on Vercel)
 
 F9 SAVE writes both the JSON download and the store. Factory `/api/run` and `/api/refine` upsert the same extras list.
 
+## Optional access code
+
+Unset `DEMO_ACCESS_CODE` → public. When set, `proxy.ts` gates the lab behind `/login`. A successful POST `/api/auth` sets an HttpOnly cookie signed with `AUTH_SECRET` (falls back to a digest of the access code). `/api/flags` and `/api/health` stay public and report `auth.required`.
+
 ## Optional OHLCV upload
 
-Default universe is seeded **DEMO10** (10 names, 2019–2024). Settings → **UPLOAD OHLCV** accepts CSV `date,ticker,open,high,low,close,volume[,vwap]` (≥2 tickers, ≥60 days). **RESET DEMO10** drops the override. Uploads persist as `data/universe-override.json` (or `/tmp`).
+Default universe is seeded **DEMO10** (10 names, 2019–2024). Settings → **UPLOAD OHLCV** accepts CSV `date,ticker,open,high,low,close,volume[,vwap]` (≥2 tickers, ≥60 days). **RESET DEMO10** drops the override. Uploads persist as `data/universe-override.json` (or `/tmp`, or Blob when the token is set).
 
 ## Deploy on Vercel
 
@@ -71,7 +84,20 @@ Import [Liyrs58/alpha-factory](https://github.com/Liyrs58/alpha-factory). Framew
 | Node | 20 |
 | Env vars | **none required** |
 
-Optional Production/Preview env: `NVIDIA_API_KEY` only. Model is locked to `google/gemma-4-31b-it`. Leave unset for the same offline mock as local. Server JSON on Vercel lives in `/tmp` (ephemeral); the browser store is the durable refine history.
+Optional Production/Preview env (all free-tier; no paid APIs):
+
+| Variable | Effect |
+| --- | --- |
+| `NVIDIA_API_KEY` | NIM proposer/critic (`google/gemma-4-31b-it`) |
+| `BLOB_READ_WRITE_TOKEN` | Durable session/universe JSON on Vercel Blob |
+| `DEMO_ACCESS_CODE` | Optional access-code gate |
+| `AUTH_SECRET` | Signs the gate cookie (recommended when gated) |
+| `PAPER_BROKER` | `off` (default) or `alpaca` |
+| `ALPACA_API_KEY` / `ALPACA_API_SECRET` | Alpaca **paper** account + optional Paper submit |
+| `ALPACA_BASE_URL` | Optional; default `https://paper-api.alpaca.markets`; live URLs refused |
+| `LIVE_TRADING` | Ignored; hard-false in code |
+
+Leave everything unset for the same offline mock as local. Server JSON on Vercel is ephemeral `/tmp` unless Blob is configured; the browser store still keeps refine history.
 
 CLI:
 
@@ -79,7 +105,7 @@ CLI:
 npx vercel
 ```
 
-First deploy succeeds with zero environment variables. Local port `4731` is only for `npm run dev` / `next start`; Vercel assigns its own URL. `/api/propose`, `/api/refine`, `/api/run`, `/api/eval`, `/api/session`, `/api/universe`, and `/api/flags` are Node.js Route Handlers.
+First deploy succeeds with zero environment variables. Local port `4731` is only for `npm run dev` / `next start`; Vercel assigns its own URL. `/api/propose`, `/api/refine`, `/api/run`, `/api/eval`, `/api/session`, `/api/universe`, `/api/flags`, `/api/health`, `/api/auth`, and `/api/paper` are Node.js Route Handlers.
 
 ## Loop
 
@@ -98,10 +124,11 @@ First deploy succeeds with zero environment variables. Local port `4731` is only
 | CSA/RPA critic scores and τ gate | **Real** (paper weights; not their SSE50 numbers) |
 | REFINE rewrite + re-backtest | **Real** (deterministic critic; NIM critic if `NVIDIA_API_KEY` is set) |
 | LLM proposer | **Real** with `NVIDIA_API_KEY` (NIM `google/gemma-4-31b-it`, `stream: true`, 180s timeout); **mock** otherwise (`M01`–`M08`) |
-| Session / refine history | **Real** JSON store + localStorage |
+| Session / refine history | **Real** JSON store + localStorage; optional Vercel Blob when `BLOB_READ_WRITE_TOKEN` is set |
 | Book combiner | **Stub vs paper**: ridge+IC by regime, not the 3-layer MLP |
 | Universe | **Stub vs paper**: synthetic DEMO10 default, not SSE50; optional CSV replace |
-| Live trading / Alpaca | **Stub**: `LIVE_TRADING=false`, `PAPER_BROKER` not wired |
+| Live trading | **Hard-off**: `LIVE_TRADING=false` forever |
+| Alpaca paper | **Real** when `PAPER_BROKER=alpaca` + keys (paper URL only, explicit Paper submit); **sim** if alpaca without keys; **off** by default |
 
 ## Click-through
 
@@ -113,7 +140,8 @@ Status line under the header should change after every action.
 - Row click (`data-alpha-id`) — editor, agents, deciles, equity follow that alpha.
 - **1Y / 3Y / 5Y / 10Y / ALL** — in the equity **header** (above the SVG). 10Y: *clamped to sample*.
 - Type `sma(close,20)-close` → **FORMAT** → `sma(close, 20) - close`. Play → `ALP-SCR`.
-- Settings → upload CSV / RESET DEMO10.
+- Settings → upload CSV / RESET DEMO10. Settings → **Paper submit** (only if `PAPER_BROKER=alpaca`) never fires on REFINE.
+- `/api/flags` and `/api/health` expose `store.durable`, `auth.required`, and the LLM badge (`MOCK` / `NVIDIA`).
 
 Keys: `F5` factory · `r` refine · `F9` save · `j/k` rows · `⌃↵` eval.
 

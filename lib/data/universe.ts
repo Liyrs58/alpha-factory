@@ -16,6 +16,9 @@ export const TICKERS: Ticker[] = [
   { id: "DISC", name: "Discant Retail", sector: "Discretionary", beta: 1.16 },
 ];
 
+/** Synthetic DEMO10 ids — never sent to Alpaca paper. */
+export const DEMO10_IDS = new Set(TICKERS.map((t) => t.id));
+
 function tradingDays(startIso: string, endIso: string): string[] {
   const out: string[] = [];
   const cur = new Date(`${startIso}T00:00:00Z`);

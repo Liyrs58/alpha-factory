@@ -130,6 +130,16 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const [statusFlash, setStatusFlash] = useState(false);
   const [llmMode, setLlmMode] = useState<"mock" | "nvidia">("mock");
   const [llmModel, setLlmModel] = useState("mock");
+  const [storeDurable, setStoreDurable] = useState(false);
+  const [paperMode, setPaperMode] = useState<"off" | "alpaca" | "sim">("off");
+  const [paperAccount, setPaperAccount] = useState<{
+    cash: number;
+    equity: number;
+    source: string;
+    status: string;
+  } | null>(null);
+  const [paperSymbol, setPaperSymbol] = useState("");
+  const [paperBusy, setPaperBusy] = useState(false);
   const [univMeta, setUnivMeta] = useState<UniverseMeta>(
     initial.universe ?? {
       source: "DEMO10",
@@ -276,13 +286,37 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           const flags = (await flagsRes.json()) as {
             llm?: "mock" | "nvidia" | "live";
             model?: string;
+            store?: { durable?: boolean };
+            paper?: { mode?: "off" | "alpaca" | "sim" };
           };
           const nvidia = flags.llm === "nvidia" || flags.llm === "live";
           setLlmMode(nvidia ? "nvidia" : "mock");
           setLlmModel(flags.model ?? (nvidia ? "google/gemma-4-31b-it" : "mock"));
+          setStoreDurable(Boolean(flags.store?.durable));
+          if (flags.paper?.mode) setPaperMode(flags.paper.mode);
         }
       } catch {
         setLlmMode("mock");
+      }
+      try {
+        const paper = await fetch("/api/paper");
+        if (paper.ok) {
+          const json = (await paper.json()) as {
+            mode?: "off" | "alpaca" | "sim";
+            account?: { cash?: number; equity?: number; source?: string; status?: string };
+          };
+          if (json.mode) setPaperMode(json.mode);
+          if (json.account) {
+            setPaperAccount({
+              cash: Number(json.account.cash ?? 0),
+              equity: Number(json.account.equity ?? 0),
+              source: String(json.account.source ?? json.mode ?? "off"),
+              status: String(json.account.status ?? ""),
+            });
+          }
+        }
+      } catch {
+        /* paper optional */
       }
       try {
         const uni = await fetch("/api/universe");
@@ -489,6 +523,51 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
         compute(extrasFrom(result), result.llmUsed, selectedId);
       } catch {
         note("reset failed");
+      }
+    })();
+  };
+
+  const onPaperSubmit = () => {
+    if (paperMode === "off") {
+      note("PAPER_BROKER=off");
+      return;
+    }
+    setPaperBusy(true);
+    note("paper submit…");
+    void (async () => {
+      try {
+        const body: Record<string, unknown> = { confirm: true };
+        const sym = paperSymbol.trim().toUpperCase();
+        if (sym) {
+          body.symbol = sym;
+          body.qty = 1;
+          body.side = "buy";
+        } else {
+          body.fromBook = true;
+        }
+        const res = await fetch("/api/paper", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const json = (await res.json()) as {
+          ok?: boolean;
+          message?: string;
+          account?: { cash?: number; equity?: number; source?: string; status?: string };
+        };
+        if (json.account) {
+          setPaperAccount({
+            cash: Number(json.account.cash ?? 0),
+            equity: Number(json.account.equity ?? 0),
+            source: String(json.account.source ?? paperMode),
+            status: String(json.account.status ?? ""),
+          });
+        }
+        flash(json.message ?? (json.ok ? "paper submitted" : "paper submit failed"));
+      } catch (e) {
+        note(e instanceof Error ? e.message : "paper submit failed");
+      } finally {
+        setPaperBusy(false);
       }
     })();
   };
@@ -764,6 +843,20 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           >
             {llmMode === "nvidia" ? "NVIDIA" : "MOCK"}
           </span>
+          <span
+            className="px-2 py-1 font-formula text-[11px] text-faint"
+            title={storeDurable ? "Vercel Blob" : "ephemeral JSON (/tmp)"}
+          >
+            STORE={storeDurable ? "blob" : "tmp"}
+          </span>
+          {paperMode !== "off" && (
+            <span
+              className="px-2 py-1 font-formula text-[11px] text-amber"
+              title="Alpaca paper or offline simulator · research book only"
+            >
+              PAPER={paperMode}
+            </span>
+          )}
           <span className="px-2 py-1 font-formula text-[11px] text-faint" title="orders disabled">
             LIVE_TRADING=off
           </span>
@@ -814,6 +907,12 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           universeLabel={univLabel}
           onPickCsv={onPickCsv}
           onResetUniverse={onResetUniverse}
+          paperMode={paperMode}
+          paperAccount={paperAccount}
+          paperBusy={paperBusy}
+          paperSymbol={paperSymbol}
+          onPaperSymbol={setPaperSymbol}
+          onPaperSubmit={onPaperSubmit}
         />
 
         <AgentStrip

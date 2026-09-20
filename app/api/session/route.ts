@@ -4,7 +4,7 @@ import type { LabSession } from "@/lib/store/types";
 export const runtime = "nodejs";
 
 export async function GET() {
-  return Response.json(loadSession());
+  return Response.json(await loadSession());
 }
 
 export async function PUT(req: Request) {
@@ -14,9 +14,9 @@ export async function PUT(req: Request) {
     if (patch.version && patch.version !== 1) {
       return Response.json({ ok: false, message: "unsupported session version" }, { status: 400 });
     }
-    const saved = upsertSession(patch, run);
+    const saved = await upsertSession(patch, run);
     return Response.json(saved);
   } catch {
-    return Response.json(saveSession(emptySession()), { status: 200 });
+    return Response.json(await saveSession(emptySession()), { status: 200 });
   }
 }

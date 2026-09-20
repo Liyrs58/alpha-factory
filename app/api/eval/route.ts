@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, message: "missing expression" }, { status: 400 });
   }
   try {
-    const { universe, meta } = getActiveUniverse();
+    const { universe, meta } = await getActiveUniverse();
     const alpha = scratchBacktest(universe, expression);
     return Response.json({ ok: true, alpha, meta });
   } catch (e) {
