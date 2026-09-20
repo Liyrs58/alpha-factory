@@ -36,7 +36,7 @@ function inferRegime(dates: string[], bars: Record<string, Bar[]>): Regime[] {
 /** CSV: date,ticker,open,high,low,close,volume[,vwap] */
 export function universeFromCsv(text: string): CsvParseOk | CsvParseError {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length < MIN_DAYS) return { ok: false; message: `need ≥${MIN_DAYS} rows` };
+  if (lines.length < MIN_DAYS) return { ok: false, message: `need ≥${MIN_DAYS} rows` };
   if (lines.length > MAX_ROWS) return { ok: false, message: `too many rows (${lines.length})` };
 
   const header = lines[0]!.toLowerCase().split(/[,;\t]/).map((h) => h.trim());
@@ -71,7 +71,7 @@ export function universeFromCsv(text: string): CsvParseOk | CsvParseError {
     byName.set(ticker, list);
   }
 
-  if (byName.size < 2) return { ok: false, message: "need ≥2 tickers" };
+  if (byName.size < 2) return { ok: false, message: `need ≥2 tickers` };
   if (byName.size > MAX_NAMES) return { ok: false, message: `too many tickers (${byName.size})` };
 
   const dateSet = new Set<string>();
