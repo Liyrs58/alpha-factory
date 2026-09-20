@@ -16,7 +16,7 @@ npm install
 npm run dev
 ```
 
-Opens [http://127.0.0.1:4731](http://127.0.0.1:4731). **No API keys required.** Sample prices are seeded (`240906289`) so every run is deterministic. The lockfile is a full `npm install` (368 packages, including Next.js SWC binaries).
+Opens [http://127.0.0.1:4731](http://127.0.0.1:4731). **No API keys required.** Sample prices are seeded (`240906289`) so every run is deterministic. The lockfile is a full `npm install` (468 lockfile entries / 368 installable packages, including Next.js SWC binaries). There is no GitHub Action that rewrites `package-lock.json`.
 
 ```bash
 npm run build
