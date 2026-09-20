@@ -1,4 +1,4 @@
-"use client";
+use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStrip } from "@/components/AgentStrip";
@@ -8,6 +8,7 @@ import { ResultsBoard } from "@/components/ResultsBoard";
 import { cardsForAlpha } from "@/lib/agents/copy";
 import { criticRewrite, nextRefinedId } from "@/lib/agents/mutate";
 import { scratchBacktest } from "@/lib/agents/pipeline";
+import { SEED_LIBRARY } from "@/lib/alphas/library";
 import { formatSource, setDelayWindows } from "@/lib/alphas/parser";
 import { UNIVERSE } from "@/lib/data/universe";
 import type { AgentEvent, EvaluatedAlpha, PipelineResult, SeedAlpha } from "@/lib/types";
@@ -40,6 +41,19 @@ function toSeed(a: EvaluatedAlpha | SeedAlpha): SeedAlpha {
     generation: a.generation,
     mutation: a.mutation,
   };
+}
+
+const SEED_IDS = new Set(SEED_LIBRARY.map((s) => s.id));
+
+/** LLM proposals + critic rewrites currently in the factory (not A01–A24). */
+function extrasFrom(result: PipelineResult): SeedAlpha[] {
+  return result.evaluated.filter((a) => !SEED_IDS.has(a.id)).map(toSeed);
+}
+
+function mergeSeeds(base: SeedAlpha[], incoming: SeedAlpha[]): SeedAlpha[] {
+  const map = new Map(base.map((s) => [s.id, s]));
+  for (const s of incoming) map.set(s.id, s);
+  return [...map.values()];
 }
 
 function applyFactory(
@@ -259,7 +273,8 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
         return;
       }
       setLlmMsg(json.message ?? `+${json.alphas.length} formulas`);
-      compute(json.alphas, !json.demo, json.alphas[0]?.id);
+      const extras = mergeSeeds(extrasFrom(result), json.alphas);
+      compute(extras, !json.demo, json.alphas[0]?.id);
     } catch {
       setLlmMsg("propose offline");
       note("propose offline");
@@ -378,7 +393,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
       if (e.key === "F5") {
         e.preventDefault();
         setBusy(true);
-        compute();
+        compute(extrasFrom(result), result.llmUsed);
       }
       if (e.key === "F9") {
         e.preventDefault();
@@ -418,7 +433,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           aria-label="Run factory"
           onClick={() => {
             setBusy(true);
-            compute();
+            compute(extrasFrom(result), result.llmUsed);
           }}
           className="flex items-center gap-2 font-formula text-[13px] tracking-wide hover:text-signal"
         >
@@ -451,7 +466,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
             aria-label="Run factory"
             onClick={() => {
               setBusy(true);
-              compute();
+              compute(extrasFrom(result), result.llmUsed);
             }}
             className="px-2 py-1 font-formula text-[11px] text-paper hover:text-signal"
           >
