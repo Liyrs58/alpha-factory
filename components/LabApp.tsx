@@ -1,4 +1,4 @@
-use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStrip } from "@/components/AgentStrip";
@@ -101,10 +101,21 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const [filter, setFilter] = useState<"all" | "passed" | "dropped">("all");
   const [pinnedDecile, setPinnedDecile] = useState<{ i: number; v: number } | null>(null);
   const [proposeIdx, setProposeIdx] = useState(0);
+  const [statusFlash, setStatusFlash] = useState(false);
+  const flashTimer = useRef<number | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
   const runGen = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
   const note = useCallback((msg: string) => setStatus(msg), []);
+
+  const flash = useCallback((msg: string) => {
+    setStatus(msg);
+    setStatusFlash(true);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setStatusFlash(false), 2400);
+  }, []);
 
   const compute = useCallback(
     (extras: SeedAlpha[] = [], llmUsed = false, preferId?: string) => {
@@ -166,7 +177,12 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
 
   const rows = useMemo(() => {
     if (!result) return [];
-    const list = [...result.evaluated].sort((a, b) => b.scores.final - a.scores.final);
+    const list = [...result.evaluated].sort((a, b) => {
+      const ag = a.generation ?? 0;
+      const bg = b.generation ?? 0;
+      if (ag !== bg) return bg - ag;
+      return b.scores.final - a.scores.final;
+    });
     if (scratch) return [scratch, ...list.filter((a) => a.id !== "SCR")];
     return list;
   }, [result, scratch]);
@@ -288,17 +304,57 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
       note("refine empty · select a row");
       return;
     }
+    const parent = toSeed(selected);
+    const generation = parent.generation ?? 0;
+    const taken = result.evaluated.map((a) => a.expression);
+    const mut = criticRewrite(parent.expression, generation, taken);
+    const id = nextRefinedId(
+      parent.id,
+      result.evaluated.map((a) => a.id),
+    );
+
+    let local: EvaluatedAlpha;
+    try {
+      local = scratchBacktest(UNIVERSE, mut.expression);
+    } catch (e) {
+      note(e instanceof Error ? e.message : "refine failed");
+      return;
+    }
+    local.id = id;
+    local.name = `${parent.name} · ${mut.label}`;
+    local.category = parent.category;
+    local.source = parent.source;
+    local.rationale = mut.note;
+    local.parentId = parent.id;
+    local.generation = generation + 1;
+    local.mutation = mut.label;
+    local.expression = mut.expression;
+
+    const optimistic: PipelineResult = {
+      ...result,
+      evaluated: [local, ...result.evaluated.filter((x) => x.id !== id)],
+      proposed: [...result.proposed.filter((p) => p.id !== id), toSeed(local)],
+    };
+    setResult(optimistic);
+    setScratch(null);
+    setSelectedId(id);
+    setExpr(mut.expression);
+    setAgent("critic");
+    setFilter("all");
+    setView("alpha");
+    setBusy(false);
+    flash(
+      `refine ${parent.id} → ${id} · ${mut.label} · Sharpe ${local.metrics.sharpe.toFixed(2)} · ${parent.expression} ⇒ ${mut.expression}`,
+    );
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-alpha-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+    });
+
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
     const gen = ++runGen.current;
-    setBusy(true);
-    setAgent("critic");
-    setFilter("all");
-    note(`refining ${selected.id}…`);
-    const parent = toSeed(selected);
     const pool = result.evaluated.map(toSeed);
-    const generation = parent.generation ?? 0;
     void (async () => {
       try {
         const res = await fetch("/api/refine", {
@@ -307,67 +363,24 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           body: JSON.stringify({ parent, pool, generation }),
           signal: ac.signal,
         });
-        if (!res.ok) throw new Error(`refine HTTP ${res.status}`);
+        if (!res.ok) return;
         const json = (await res.json()) as {
           ok: boolean;
-          mutation: string;
           child: SeedAlpha;
           result: PipelineResult;
-          message: string;
         };
-        if (gen !== runGen.current) return;
-        if (!json.ok) throw new Error("refine failed");
+        if (gen !== runGen.current || !json.ok) return;
         setResult(json.result);
-        setScratch(null);
-        setSelectedId(json.child.id);
-        setExpr(json.child.expression);
-        setLastRun(`${AS_OF} 09:14:32`);
-        setBusy(false);
-        const child = json.result.evaluated.find((a) => a.id === json.child.id);
-        note(
-          `${json.message} · Sharpe ${(child?.metrics.sharpe ?? 0).toFixed(2)} · ${json.child.expression}`,
-        );
-      } catch (e) {
-        if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
-          if (gen === runGen.current) {
-            setBusy(false);
-            note("stopped");
-          }
-          return;
+        const stillOnChild = selectedIdRef.current === id || selectedIdRef.current === json.child.id;
+        if (stillOnChild) {
+          setSelectedId(json.child.id);
+          setExpr(json.child.expression);
         }
-        try {
-          const taken = result.evaluated.map((a) => a.expression);
-          const mut = criticRewrite(parent.expression, generation, taken);
-          const id = nextRefinedId(parent.id, result.evaluated.map((a) => a.id));
-          const a = scratchBacktest(UNIVERSE, mut.expression);
-          a.id = id;
-          a.name = `${parent.name} · ${mut.label}`;
-          a.category = parent.category;
-          a.source = parent.source;
-          a.rationale = mut.note;
-          a.parentId = parent.id;
-          a.generation = generation + 1;
-          a.mutation = mut.label;
-          a.expression = mut.expression;
-          if (gen !== runGen.current) return;
-          setResult({
-            ...result,
-            evaluated: [a, ...result.evaluated.filter((x) => x.id !== id)],
-            proposed: [...result.proposed, toSeed(a)],
-          });
-          setScratch(null);
-          setSelectedId(id);
-          setExpr(mut.expression);
-          setBusy(false);
-          note(`refine ${parent.id} → ${id} · ${mut.label} · Sharpe ${a.metrics.sharpe.toFixed(2)} · ${mut.expression}`);
-        } catch (inner) {
-          if (gen !== runGen.current) return;
-          setBusy(false);
-          note(inner instanceof Error ? inner.message : "refine failed");
-        }
+      } catch {
+        /* local rewrite already visible */
       }
     })();
-  }, [note, result, selected]);
+  }, [flash, note, result, selected]);
 
   const onAgent = (who: AgentEvent["agent"]) => {
     setAgent(who);
@@ -483,7 +496,10 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           <span className="px-2 py-1 font-formula text-[11px] text-mute">demo</span>
         </div>
       </header>
-      <div className="border-b border-line px-3 py-1 font-formula text-[10px] text-mute" role="status">
+      <div
+        className={`border-b px-3 py-1 font-formula text-[10px] ${statusFlash ? "border-signal bg-signal text-ink" : "border-line text-mute"}`}
+        role="status"
+      >
         {status}
       </div>
 
@@ -532,7 +548,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
           onRefine={onRefine}
         />
 
-        <div className="grid min-h-0 flex-1 gap-2 lg:grid-cols-2">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(12rem,1fr)] gap-2 md:grid-cols-2 md:grid-rows-[minmax(0,1fr)]">
           {result && (
             <>
               <ResultsBoard
@@ -553,7 +569,7 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
                 }}
               />
               {chartMetrics && (
-                <div className="relative z-10 flex min-h-0 flex-col gap-1 overflow-hidden">
+                <div className="relative z-0 flex h-full min-h-0 min-w-0 flex-col gap-1 overflow-hidden">
                   <div className="flex gap-1 px-1">
                     <button
                       type="button"
