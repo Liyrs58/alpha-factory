@@ -11,20 +11,25 @@ export type AgentCard = {
 export function cardsForAlpha(a: EvaluatedAlpha, bookKept: boolean): AgentCard[] {
   const m = a.metrics;
   const to = `${Math.round(m.turnover * 100)}%`;
+  const lineage = a.mutation
+    ? `Refine ${a.parentId ?? "parent"} → ${a.id} (${a.mutation}). `
+    : `Proposed ${a.expression}. `;
   return [
     {
       agent: "proposer",
       title: "PROPOSER",
       latency: "60ms",
-      body: `Proposed ${a.expression}. ${a.rationale} IC decay profile suggests a 3–7 day horizon.`,
+      body: `${lineage}${a.rationale} IC decay profile suggests a 3–7 day horizon.`,
     },
     {
       agent: "critic",
       title: "CRITIC",
       latency: "120ms",
-      body: bookKept
-        ? `θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)}. Turnover may spike on volume shocks. Consider vol filter or ADV cap to improve robustness.`
-        : `Below gate τ. θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)} |IC|=${fmtNum(Math.abs(m.ic), 3)}. Category slot filled by a higher-scoring seed.`,
+      body: a.mutation
+        ? `${a.mutation}. θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)} |IC|=${fmtNum(Math.abs(m.ic), 3)}. ${a.scores.passed ? "Clears τ after rewrite." : "Still below τ; keep iterating."}`
+        : bookKept
+          ? `θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)}. Turnover may spike on volume shocks. Consider vol filter or ADV cap to improve robustness.`
+          : `Below gate τ. θ=${fmtNum(a.scores.confidence, 2)} ρ=${fmtNum(a.scores.risk, 2)} |IC|=${fmtNum(Math.abs(m.ic), 3)}. Category slot filled by a higher-scoring seed.`,
     },
     {
       agent: "backtester",

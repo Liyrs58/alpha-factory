@@ -35,7 +35,7 @@ export function ResultsBoard({
   const maxAbs = Math.max(0.0001, ...deciles.map((d) => Math.abs(d)));
 
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-[4px] border border-line bg-[#16181f]">
+    <section className="relative z-10 flex min-h-0 flex-col overflow-hidden rounded-[4px] border border-line bg-[#16181f]">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-3 py-1.5 font-formula text-[10px] tracking-wide text-mute">
         <span className="text-paper">RESULTS</span>
         <span>LAST RUN: {lastRun}</span>
@@ -80,9 +80,19 @@ export function ResultsBoard({
               return (
                 <tr
                   key={a.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={on}
+                  data-alpha-id={a.id}
                   onClick={() => onSelect(a.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelect(a.id);
+                    }
+                  }}
                   className={clsx(
-                    "cursor-pointer border-b border-line/80 hover:bg-[#1c1f28]",
+                    "relative z-10 cursor-pointer border-b border-line/80 hover:bg-[#1c1f28]",
                     on && "bg-[#22252e]",
                   )}
                 >
