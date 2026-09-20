@@ -136,7 +136,7 @@ export function EquityBoard({
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_148px]">
         <div
-          className="relative min-h-[200px]"
+          className="relative z-0 min-h-[200px] overflow-hidden"
           onMouseMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const px = ((e.clientX - rect.left) / rect.width) * w;
@@ -147,7 +147,7 @@ export function EquityBoard({
           <svg
             ref={svgRef}
             viewBox={`0 0 ${w} ${h}`}
-            className="h-full w-full"
+            className="pointer-events-none h-full w-full"
             xmlns="http://www.w3.org/2000/svg"
           >
             <rect width={w} height={h} fill="#16181f" />
@@ -206,7 +206,7 @@ export function EquityBoard({
           <Stat k="CALMAR" v={fmtNum(metrics.calmar, 2)} pos={metrics.calmar} />
         </dl>
       </div>
-      <footer className="flex items-center gap-1 border-t border-line px-2 py-1.5">
+      <footer className="relative z-20 flex shrink-0 items-center gap-1 border-t border-line px-2 py-1.5">
         {RANGES.map((r) => (
           <button
             key={r}
@@ -218,7 +218,7 @@ export function EquityBoard({
               onNotice?.(`window ${r}${r !== "ALL" && BARS[r] > dates.length ? " · clamped to sample" : ""}`);
             }}
             className={clsx(
-              "px-2 py-0.5 font-formula text-[10px] tracking-wide",
+              "relative z-20 px-2 py-0.5 font-formula text-[10px] tracking-wide",
               range === r ? "bg-paper text-ink" : "text-mute hover:text-paper",
             )}
           >
