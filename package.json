@@ -10,7 +10,9 @@
     "build": "next build",
     "start": "next start --port 4731",
     "lint": "eslint",
-    "selftest": "npx tsx lib/selftest.ts"
+    "selftest": "npx tsx lib/selftest.ts",
+    "ensure:pitch": "node scripts/ensure-investor-pitch.cjs",
+    "prebuild": "node scripts/ensure-investor-pitch.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.3.1",
