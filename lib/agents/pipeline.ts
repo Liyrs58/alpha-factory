@@ -15,7 +15,18 @@ import type {
   RegimeWeights,
   SeedAlpha,
   Universe,
+  UniverseMeta,
 } from "../types";
+
+function metaOf(universe: Universe, source: UniverseMeta["source"] = "DEMO10"): UniverseMeta {
+  return {
+    source,
+    nS: universe.tickers.length,
+    nT: universe.dates.length,
+    dates: universe.dates,
+    tickers: universe.tickers.map((t) => t.id),
+  };
+}
 
 const CLOCK = ["09:31:04", "09:31:11", "09:31:19", "09:31:27", "09:31:36", "09:31:48", "09:32:02"];
 
@@ -200,22 +211,25 @@ export function runPipelineFromSeeds(
   universe: Universe,
   seeds: SeedAlpha[],
   llmUsed = false,
+  meta?: UniverseMeta,
 ): PipelineResult {
-  return runPipelineOn(universe, seeds, llmUsed);
+  return runPipelineOn(universe, seeds, llmUsed, meta);
 }
 
 export function runPipeline(
   universe: Universe,
   extras: SeedAlpha[] = [],
   llmUsed = false,
+  meta?: UniverseMeta,
 ): PipelineResult {
-  return runPipelineOn(universe, [...SEED_LIBRARY, ...extras], llmUsed);
+  return runPipelineOn(universe, [...SEED_LIBRARY, ...extras], llmUsed, meta);
 }
 
 function runPipelineOn(
   universe: Universe,
   proposed: SeedAlpha[],
   llmUsed: boolean,
+  meta?: UniverseMeta,
 ): PipelineResult {
   const panel = buildPanel(universe);
   const events: AgentEvent[] = [];
@@ -380,7 +394,14 @@ function runPipelineOn(
     pmNote,
   };
 
-  return { proposed, evaluated, book, events, llmUsed };
+  return {
+    proposed,
+    evaluated,
+    book,
+    events,
+    llmUsed,
+    universe: meta ?? metaOf(universe),
+  };
 }
 
 export function scratchBacktest(universe: Universe, expression: string): EvaluatedAlpha {
