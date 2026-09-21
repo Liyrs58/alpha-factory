@@ -66,8 +66,11 @@ async function main() {
 
   const result = runPipeline(UNIVERSE);
   assert(result.evaluated.length === SEED_LIBRARY.length, "eval count");
-  assert(result.book.selected.length >= 3, "book too small");
+  assert(result.book.selected.every((alpha) => alpha.scores.passed), "book includes an alpha that failed training gates");
   assert(result.book.equity.length > 10, "equity");
+  if (result.book.selected.length === 0) {
+    assert(result.book.dailyReturns.every((ret) => ret === 0), "empty training book must stay in cash");
+  }
   assert(result.universe.source === "DEMO10", "default universe meta");
   assert(result.universe.nS === 10, "universe nS");
 

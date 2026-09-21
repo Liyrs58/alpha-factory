@@ -116,7 +116,7 @@ First deploy succeeds with zero environment variables. Local port `4731` is only
 1. **Proposer** — Seed Alpha Factory (paper + WorldQuant-style DSL) plus NVIDIA NIM or mock. Expressions are parsed and executed on OHLCV, not table decoration.
 2. **Critic** — CSA + RPA, \(w_c=0.6\), \(w_r=0.4\), \(\tau=0.58\). **REFINE** rewrites the selected formula; new id `{parent}R{n}`; editor and agent notes show the mutation.
 3. **Backtester** — Next-day long-short / top-k on the active universe (DEMO10 or upload). Equity, Sharpe, max drawdown, IC/IR from returns.
-4. **PM** — Regime (bull / bear / sideways) ridge+IC weights (stand-in for the paper’s 3-layer MLP). **BOOK** is the composite equity.
+4. **PM** — Regime (bull / bear / sideways) ridge+IC weights (stand-in for the paper’s 3-layer MLP), refit from past-only labels every 21 sessions. **BOOK** reports final-20% walk-forward test equity after stylized transaction costs.
 
 ## Real vs stub
 

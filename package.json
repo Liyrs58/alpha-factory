@@ -14,8 +14,7 @@
     "ensure:pitch": "node scripts/ensure-investor-pitch.cjs",
     "prebuild": "node scripts/ensure-investor-pitch.cjs",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "experiment:historical": "npx tsx scripts/run-historical-experiment.ts"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@vercel/blob": "^2.3.1",

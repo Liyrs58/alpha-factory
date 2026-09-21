@@ -1,84 +1,15 @@
 {
   "name": "stooq-liq10-wf-oos",
-  "createdAt": "2026-09-20T23:09:16.994Z",
-  "dataKind": "historical",
-  "synthetic": false,
-  "demo10SyntheticForever": true,
-  "provider": "cache:/workspace/alpha-factory/data/cache/ohlcv/ohlcv_aapl-msft-googl-amzn-meta-nvda-jpm-xom-jnj-pg_2019-01-02_2024-12-31.csv",
-  "tickers": [
-    "AAPL",
-    "MSFT",
-    "GOOGL",
-    "AMZN",
-    "META",
-    "NVDA",
-    "JPM",
-    "XOM",
-    "JNJ",
-    "PG"
+  "status": "NOT_REPRODUCIBLE",
+  "reason": "The manifest's provider points to /workspace/alpha-factory/data/cache/ohlcv, a cache path outside this repository. No source CSV, downloader, experiment runner, or metrics artifact is included in this branch.",
+  "claimedHistoricalPerformance": null,
+  "requiredInputs": [
+    "A versioned historical OHLCV CSV with source, retrieval timestamp, and license/provenance notes",
+    "A checked-in experiment runner and reproducible output"
   ],
-  "periods": {
-    "full": {
-      "start": "2019-01-02",
-      "end": "2024-12-31"
-    },
-    "train": {
-      "start": "2019-01-02",
-      "end": "2022-08-05"
-    },
-    "val": {
-      "start": "2022-08-08",
-      "end": "2023-10-18"
-    },
-    "test": {
-      "start": "2023-10-19",
-      "end": "2024-12-31"
-    },
-    "nT": 1510,
-    "nS": 10,
-    "split": {
-      "trainEnd": 906,
-      "valEnd": 1208,
-      "testEnd": 1510
-    }
-  },
-  "methodology": {
-    "selection": "CSA/RPA on TRAIN only (τ gate); category-diverse top",
-    "weights": "regime ridge+IC fit on past only (walk-forward) or TRAIN (fixed TEST)",
-    "hold": "1 day",
-    "topK": 4,
-    "costs_bps": {
-      "bpsPerTurnover": 5,
-      "slippageBps": 2
-    },
-    "benchmark": "equal-weight universe on TEST window",
-    "icSign": "from TRAIN IC only",
-    "multipleTestingWarning": "Many seed formulas screened; TEST metrics are exploratory. No claim of family-wise error control.",
-    "leakageControls": [
-      "fitRegimeWeightsOnRange never reads t >= t1",
-      "walk-forward refit uses only past days",
-      "alpha selection uses TRAIN metrics only for this experiment"
-    ]
-  },
-  "selected": [
-    "A24",
-    "A09",
-    "A05",
-    "A13",
-    "A19"
-  ],
-  "expressions": [
-    "ts_delta(rank(close), 3)",
-    "(boll_up - boll_down) / sma(close, 20)",
-    "sma(close, 20) - close",
-    "volume * close",
-    "rank(ts_delta(close, 5)) - rank(volume)"
-  ],
-  "icSignsTrain": [
-    -1,
-    -1,
-    1,
-    1,
-    -1
-  ]
+  "demo10": {
+    "dataKind": "synthetic",
+    "synthetic": true,
+    "plantedStructure": "Next-day residual return depends on 14-day momentum, distance from SMA, and inverse volume rank; see lib/data/universe.ts."
+  }
 }

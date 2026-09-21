@@ -152,9 +152,13 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const [runCount, setRunCount] = useState(0);
   const flashTimer = useRef<number | null>(null);
   const selectedIdRef = useRef(selectedId);
-  selectedIdRef.current = selectedId;
   const resultRef = useRef(result);
-  resultRef.current = result;
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+  useEffect(() => {
+    resultRef.current = result;
+  }, [result]);
   const runGen = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const restored = useRef(false);
@@ -378,7 +382,11 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const selected = rows.find((a) => a.id === selectedId) ?? rows[0] ?? null;
   const inBook = Boolean(result && selected && result.book.selected.some((s) => s.id === selected.id));
   const cards = selected ? cardsForAlpha(selected, inBook) : [];
-  const chartDates = result ? datesOf(result) : univMeta.dates;
+  const chartDates = result
+    ? view === "book"
+      ? result.book.evaluationDates
+      : datesOf(result).slice(0, selected?.equity.length ?? 0)
+    : univMeta.dates;
   const asOf = chartDates[chartDates.length - 1] ?? "";
   const period = chartDates.length ? `${chartDates[0]} – ${chartDates[chartDates.length - 1]}` : "";
 
@@ -768,7 +776,11 @@ export default function LabApp({ initial }: { initial: PipelineResult }) {
   const chartMetrics =
     view === "book" && result ? result.book.metrics : selected?.metrics;
   const chartLabel =
-    view === "book" ? "BOOK composite" : selected ? `ALP-${selected.id}` : "—";
+    view === "book"
+      ? `BOOK OOS · ${result?.book.testStart ?? ""}`
+      : selected
+        ? `ALPHA TRAIN · ${selected.id}`
+        : "—";
   const univLabel = univMeta.source === "DEMO10" ? "DEMO10" : `UPLOAD ${univMeta.nS}`;
 
   return (

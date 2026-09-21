@@ -3,7 +3,7 @@
 | Source | Kind | Path / how | Label |
 | --- | --- | --- | --- |
 | **DEMO10** | **SYNTHETIC forever** | `lib/data/universe.ts` seed `240906289`; planted IC structure documented in-file | **SYNTHETIC DEMO** |
-| **Historical OHLCV** | Market (Yahoo chart v8; Stooq fallback) | `lib/data/download.ts` → cache `data/cache/ohlcv/*.csv` | **HISTORICAL OOS** |
+| **Historical OHLCV** | External data only if uploaded by the user | No downloader or committed cache in this branch | Not demonstrated |
 | **Upload CSV** | User-provided | Settings → UPLOAD; `data/universe-override.json` | **UPLOAD** |
 
 ## Cache schema
@@ -13,8 +13,7 @@ Long CSV: `date,ticker,open,high,low,close,volume` (optional `vwap`). Parsed by 
 ## Offline
 
 - DEMO10 always works with zero network.
-- Historical: `npm run experiment:historical` uses cache if present; `AF_EXPERIMENT_OFFLINE=1` refuses download.
-- Instructions: `npx tsx -e` calling `downloadHistoricalUniverse()` or `npm run experiment:historical`.
+- The current branch does not contain a historical downloader or historical experiment runner. `npm run experiment:historical` is not provided.
 
 ## DEMO10 planted structure (synthetic)
 

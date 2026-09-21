@@ -8,19 +8,17 @@ const VIDEO_SRC = "/demo/investor-pitch.mp4";
 export function IntroPitchModal() {
   const [open, setOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    try {
-      if (window.localStorage.getItem(LS_KEY) === "1") {
-        setReady(true);
-        return;
+    const timer = window.setTimeout(() => {
+      try {
+        if (window.localStorage.getItem(LS_KEY) === "1") return;
+      } catch {
+        /* private mode */
       }
-    } catch {
-      /* private mode */
-    }
-    setOpen(true);
-    setReady(true);
+      setOpen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const dismiss = useCallback(() => {
@@ -45,7 +43,7 @@ export function IntroPitchModal() {
     return () => window.removeEventListener("af:watch-intro", onReplay);
   }, [replay]);
 
-  if (!ready || !open) return null;
+  if (!open) return null;
 
   return (
     <div

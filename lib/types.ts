@@ -100,6 +100,13 @@ export type Book = {
   metrics: AlphaMetrics;
   benchMetrics: AlphaMetrics;
   regimePath: Regime[];
+  /** Date labels for the OOS NAV path; length matches equity/bench. */
+  evaluationDates: string[];
+  /** Long-only target weights used at each OOS close-to-close decision. */
+  holdings: Record<string, number[]>;
+  trainingEnd: string;
+  testStart: string;
+  costBps: number;
   pmNote: string;
 };
 

@@ -1,9 +1,9 @@
 import { SEED_LIBRARY, CATEGORY_LABEL, TAU, WC, WR } from "../alphas/library";
 import { buildPanel, evalExpression, type Panel } from "../alphas/eval";
-import { backtestAlpha, equalWeightBench, fwdReturns, row } from "../backtest/engine";
-import { fromReturns } from "../backtest/stats";
+import { backtestAlpha, fwdReturns, row } from "../backtest/engine";
+import { fromReturns, turnoverFromWeights } from "../backtest/stats";
 import { l1Normalize, ridge } from "../linalg";
-import { pearson, rankData } from "../rng";
+import { mean, pearson, rankData, stdev } from "../rng";
 import { scoreAlpha } from "./score";
 import type {
   AgentEvent,
@@ -25,6 +25,23 @@ function metaOf(universe: Universe, source: UniverseMeta["source"] = "DEMO10"): 
     nT: universe.dates.length,
     dates: universe.dates,
     tickers: universe.tickers.map((t) => t.id),
+  };
+}
+
+const TRAIN_FRACTION = 0.6;
+const TEST_FRACTION_START = 0.8;
+const REGIME_REFIT_DAYS = 21;
+const TRANSACTION_COST_BPS = 10;
+
+function prefixUniverse(universe: Universe, endExclusive: number): Universe {
+  const end = Math.max(0, Math.min(universe.dates.length, endExclusive));
+  return {
+    tickers: universe.tickers,
+    dates: universe.dates.slice(0, end),
+    regimes: universe.regimes.slice(0, end),
+    bars: Object.fromEntries(
+      universe.tickers.map(({ id }) => [id, universe.bars[id]!.slice(0, end)]),
+    ),
   };
 }
 
@@ -166,19 +183,72 @@ function fitRegimeWeights(
   return weights;
 }
 
-function compositeBacktest(
+export function walkForwardBacktest(
   panel: Panel,
   selected: EvaluatedAlpha[],
-  weights: RegimeWeights,
   universe: Universe,
-): { daily: number[]; equity: number[] } {
+): {
+  daily: number[];
+  benchDaily: number[];
+  equity: number[];
+  benchEquity: number[];
+  weights: RegimeWeights;
+  turnover: number;
+  ic: number;
+  icStd: number;
+  evaluationDates: string[];
+  holdings: Record<string, number[]>;
+  regimePath: Regime[];
+  trainingEnd: string;
+  testStart: string;
+} {
+  const nT = panel.nT;
+  const trainingEndIdx = Math.floor(nT * TRAIN_FRACTION);
+  const testStartIdx = Math.floor(nT * TEST_FRACTION_START);
+  if (trainingEndIdx < 2 || testStartIdx <= trainingEndIdx || testStartIdx >= nT - 1) {
+    throw new Error("Walk-forward backtest requires enough rows for chronological train, validation, and test periods.");
+  }
   const alphas = signedAlphas(panel, selected);
   const fwd = fwdReturns(panel);
-  const daily: number[] = [];
   const k = selected.length;
+  const daily: number[] = [];
+  const benchDaily: number[] = [];
+  const turnover: number[] = [];
+  const ics: number[] = [];
+  const holdings: Record<string, number[]> = {};
+  const regimePath: Regime[] = [];
+  const latestWeights: RegimeWeights = {
+    bull: [], bear: [], sideways: [],
+  };
+  let prevW: number[] | null = null;
 
-  for (let t = 0; t < panel.nT - 1; t++) {
-    const w = weights[universe.regimes[t]!];
+  for (let t = testStartIdx; t < nT - 1; t++) {
+    // Refit only at the start of the test and every 21 days, using a prefix
+    // that ends at t. Its last usable forward label is t-1 → t, known now.
+    if (selected.length > 0 && (t - testStartIdx) % REGIME_REFIT_DAYS === 0) {
+      const fitUniverse = prefixUniverse(universe, t + 1);
+      latestWeights.bull = [];
+      latestWeights.bear = [];
+      latestWeights.sideways = [];
+      const fitted = fitRegimeWeights(buildPanel(fitUniverse), selected, fitUniverse);
+      latestWeights.bull = fitted.bull;
+      latestWeights.bear = fitted.bear;
+      latestWeights.sideways = fitted.sideways;
+    }
+    const rowReturns = row(panel, fwd, t);
+    if (selected.length === 0) {
+      // No training candidate cleared the gate: hold cash instead of turning
+      // tied zero signals into an accidental equal-weight long book.
+      const cash = new Array<number>(panel.nS).fill(0);
+      daily.push(0);
+      benchDaily.push(mean(rowReturns.filter(Number.isFinite)));
+      turnover.push(0);
+      holdings[universe.dates[t]!] = cash;
+      regimePath.push(universe.regimes[t]!);
+      prevW = cash;
+      continue;
+    }
+    const w = latestWeights[universe.regimes[t]!];
     const signal = new Array<number>(panel.nS).fill(0);
     const rows = alphas.map((a) => zscoreRow(row(panel, a, t)));
     for (let s = 0; s < panel.nS; s++) {
@@ -192,15 +262,48 @@ function compositeBacktest(
       .sort((a, b) => b.v - a.v);
     const kLong = Math.min(4, ranked.length);
     if (kLong === 0) continue;
-    let ret = 0;
+    const target = new Array<number>(panel.nS).fill(0);
+    for (let i = 0; i < kLong; i++) target[ranked[i]!.i] = 1 / kLong;
+    const ic = pearson(rankData(signal), rankData(rowReturns));
+    if (Number.isFinite(ic)) ics.push(ic);
+    let grossRet = 0;
     for (let i = 0; i < kLong; i++) {
       const s = ranked[i]!.i;
       const r = fwd[t * panel.nS + s];
-      if (Number.isFinite(r)) ret += r / kLong;
+      if (Number.isFinite(r)) grossRet += r / kLong;
     }
-    daily.push(ret);
+    const traded = turnoverFromWeights(prevW, target);
+    daily.push(grossRet - traded * TRANSACTION_COST_BPS / 10_000);
+    benchDaily.push(mean(rowReturns.filter(Number.isFinite)));
+    turnover.push(traded);
+    holdings[universe.dates[t]!] = target;
+    regimePath.push(universe.regimes[t]!);
+    prevW = target;
   }
-  return { daily, equity: fromReturns(daily).equity };
+  const bookPath = fromReturns(daily);
+  const benchPath = fromReturns(benchDaily);
+  const icMean = ics.length ? mean(ics) : 0;
+  const icStd = ics.length > 2 ? stdev(ics) : 0;
+  bookPath.metrics.ic = icMean;
+  bookPath.metrics.icStd = icStd;
+  bookPath.metrics.ir = icStd < 1e-12 ? 0 : (icMean / icStd) * Math.sqrt(252);
+  bookPath.metrics.tstat = icStd < 1e-12 ? 0 : (icMean / icStd) * Math.sqrt(ics.length);
+  bookPath.metrics.turnover = turnover.length ? mean(turnover) : 0;
+  return {
+    daily,
+    benchDaily,
+    equity: bookPath.equity,
+    benchEquity: benchPath.equity,
+    weights: latestWeights,
+    turnover: bookPath.metrics.turnover,
+    ic: icMean,
+    icStd,
+    evaluationDates: universe.dates.slice(testStartIdx),
+    holdings,
+    regimePath,
+    trainingEnd: universe.dates[trainingEndIdx - 1]!,
+    testStart: universe.dates[testStartIdx]!,
+  };
 }
 
 export function evaluateSeed(panel: Panel, seed: SeedAlpha): EvaluatedAlpha {
@@ -232,6 +335,9 @@ function runPipelineOn(
   meta?: UniverseMeta,
 ): PipelineResult {
   const panel = buildPanel(universe);
+  const trainingEndIdx = Math.floor(universe.dates.length * TRAIN_FRACTION);
+  const trainingUniverse = prefixUniverse(universe, trainingEndIdx);
+  const trainingPanel = buildPanel(trainingUniverse);
   const events: AgentEvent[] = [];
   let tick = 0;
 
@@ -254,7 +360,7 @@ function runPipelineOn(
 
   const evaluated = proposed.map((seed) => {
     try {
-      return evaluateSeed(panel, seed);
+      return evaluateSeed(trainingPanel, seed);
     } catch (err) {
       const failed: EvaluatedAlpha = {
         ...seed,
@@ -316,40 +422,19 @@ function runPipelineOn(
     });
   }
 
-  const weights = fitRegimeWeights(panel, selected, universe);
-  const bookPath = compositeBacktest(panel, selected, weights, universe);
-  const bench = equalWeightBench(panel);
+  const bookPath = walkForwardBacktest(panel, selected, universe);
   const bookMetrics = fromReturns(bookPath.daily).metrics;
-  const benchMetrics = fromReturns(bench.daily).metrics;
-
-  // Attach IC of the composite via a synthetic alpha = weighted zscores last-pass already in returns
-  const combo = backtestAlpha(
-    panel,
-    (() => {
-      const alphas = signedAlphas(panel, selected);
-      const out = new Float64Array(panel.nT * panel.nS);
-      for (let t = 0; t < panel.nT; t++) {
-        const w = weights[universe.regimes[t]!];
-        const rows = alphas.map((a) => zscoreRow(row(panel, a, t)));
-        for (let s = 0; s < panel.nS; s++) {
-          let v = 0;
-          for (let j = 0; j < selected.length; j++) v += (w[j] ?? 0) * (rows[j]![s] ?? 0);
-          out[t * panel.nS + s] = v;
-        }
-      }
-      return out;
-    })(),
-    { longK: 4, shortK: 0 },
-  );
-  bookMetrics.ic = combo.metrics.ic;
-  bookMetrics.ir = combo.metrics.ir;
-  bookMetrics.coverage = combo.metrics.coverage;
-  bookMetrics.turnover = combo.metrics.turnover;
+  const benchMetrics = fromReturns(bookPath.benchDaily).metrics;
+  bookMetrics.ic = bookPath.ic;
+  bookMetrics.icStd = bookPath.icStd;
+  bookMetrics.ir = bookPath.icStd < 1e-12 ? 0 : (bookPath.ic / bookPath.icStd) * Math.sqrt(252);
+  bookMetrics.tstat = bookPath.icStd < 1e-12 ? 0 : (bookPath.ic / bookPath.icStd) * Math.sqrt(bookPath.daily.length);
+  bookMetrics.turnover = bookPath.turnover;
 
   events.push({
     agent: "backtester",
     t: stamp(tick++),
-    body: `LS/top-k book vs EW universe. Hold=1d  k=4  n=${universe.tickers.length}  T=${universe.dates.length}`,
+    body: `${selected.length ? "Walk-forward OOS top-k vs EW" : "No training alpha passed; the book stayed in cash"}. Train through ${bookPath.trainingEnd}; test from ${bookPath.testStart}; regime refit every ${REGIME_REFIT_DAYS}d; costs ${TRANSACTION_COST_BPS}bps one-way.`,
     tone: "info",
   });
   events.push({
@@ -359,8 +444,9 @@ function runPipelineOn(
     tone: bookMetrics.sharpe >= 0 ? "pass" : "fail",
   });
 
+  const weights = bookPath.weights;
   const share = (r: Regime) =>
-    universe.regimes.filter((x) => x === r).length / universe.regimes.length;
+    bookPath.regimePath.filter((x) => x === r).length / Math.max(bookPath.regimePath.length, 1);
   const wLine = (r: Regime) =>
     selected
       .map((a, i) => `${a.id}:${(weights[r][i] ?? 0).toFixed(2)}`)
@@ -368,7 +454,9 @@ function runPipelineOn(
 
   const pmNote = [
     `regime mix  bull ${(share("bull") * 100).toFixed(0)}%  bear ${(share("bear") * 100).toFixed(0)}%  side ${(share("sideways") * 100).toFixed(0)}%`,
-    `ridge |A|=${selected.length}  λ=0.35  (paper MLP |A|→10→1, demo stand-in)`,
+    selected.length
+      ? `ridge λ=0.8 + IC prior |A|=${selected.length}  (paper MLP stand-in)`
+      : "No alpha passed training-only selection; portfolio exposure is zero.",
     `BULL  ${wLine("bull")}`,
     `BEAR  ${wLine("bear")}`,
     `SIDE  ${wLine("sideways")}`,
@@ -385,12 +473,17 @@ function runPipelineOn(
     selected,
     weights,
     equity: bookPath.equity,
-    bench: bench.equity,
+    bench: bookPath.benchEquity,
     dailyReturns: bookPath.daily,
-    benchReturns: bench.daily,
+    benchReturns: bookPath.benchDaily,
     metrics: bookMetrics,
     benchMetrics,
-    regimePath: universe.regimes,
+    regimePath: bookPath.regimePath,
+    evaluationDates: bookPath.evaluationDates,
+    holdings: bookPath.holdings,
+    trainingEnd: bookPath.trainingEnd,
+    testStart: bookPath.testStart,
+    costBps: TRANSACTION_COST_BPS,
     pmNote,
   };
 
@@ -405,7 +498,8 @@ function runPipelineOn(
 }
 
 export function scratchBacktest(universe: Universe, expression: string): EvaluatedAlpha {
-  const panel = buildPanel(universe);
+  const trainEnd = Math.floor(universe.dates.length * TRAIN_FRACTION);
+  const panel = buildPanel(prefixUniverse(universe, trainEnd));
   return evaluateOne(panel, {
     id: "SCR",
     name: "scratch",
