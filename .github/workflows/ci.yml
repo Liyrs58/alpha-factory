@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "quant/**", "fix/**", "chore/**"]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+        env:
+          NVIDIA_API_KEY: ""
+          BLOB_READ_WRITE_TOKEN: ""
+          PAPER_BROKER: "off"
+          LIVE_TRADING: "false"
+      - name: Self-test (offline)
+        run: npm run selftest
+        env:
+          NVIDIA_API_KEY: ""
+          BLOB_READ_WRITE_TOKEN: ""
+          PAPER_BROKER: "off"
+          LIVE_TRADING: "false"
+      - name: Build
+        run: npm run build
+        env:
+          NVIDIA_API_KEY: ""
+          BLOB_READ_WRITE_TOKEN: ""

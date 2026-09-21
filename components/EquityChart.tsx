@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Book, Regime, Universe } from "@/lib/types";
+import type { Book, Regime } from "@/lib/types";
 import { fmtPct } from "@/lib/format";
 
 function regimeFill(r: Regime): string {
@@ -12,10 +12,8 @@ function regimeFill(r: Regime): string {
 
 export function EquityChart({
   book,
-  universe,
 }: {
   book: Book;
-  universe: Universe;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const w = 760;
@@ -60,9 +58,9 @@ export function EquityChart({
   const bands: { x: number; width: number; fill: string }[] = [];
   let bi = 0;
   while (bi < n - 1) {
-    const r = universe.regimes[Math.min(bi, universe.regimes.length - 1)]!;
+    const r = book.regimePath[Math.min(bi, book.regimePath.length - 1)]!;
     let j = bi + 1;
-    while (j < n - 1 && universe.regimes[Math.min(j, universe.regimes.length - 1)] === r) j++;
+    while (j < n - 1 && book.regimePath[Math.min(j, book.regimePath.length - 1)] === r) j++;
     bands.push({ x: x(bi), width: x(j) - x(bi), fill: regimeFill(r) });
     bi = j;
   }
@@ -131,7 +129,7 @@ export function EquityChart({
       </div>
       {hi !== null && geom.eq[hi] !== undefined && (
         <div className="pointer-events-none absolute top-1 right-3 font-formula text-[11px] leading-4 text-paper">
-          <div>{universe.dates[Math.min(hi, universe.dates.length - 1)]}</div>
+          <div>{book.evaluationDates[Math.min(hi, book.evaluationDates.length - 1)]}</div>
           <div>
             {fmtPct(geom.eq[hi]! - 1, 1)}
             <span className="text-mute"> · bench {fmtPct((geom.bn[hi] ?? 1) - 1, 1)}</span>

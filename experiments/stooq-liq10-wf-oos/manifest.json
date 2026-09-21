@@ -1,0 +1,15 @@
+{
+  "name": "stooq-liq10-wf-oos",
+  "status": "NOT_REPRODUCIBLE",
+  "reason": "The manifest's provider points to /workspace/alpha-factory/data/cache/ohlcv, a cache path outside this repository. No source CSV, downloader, experiment runner, or metrics artifact is included in this branch.",
+  "claimedHistoricalPerformance": null,
+  "requiredInputs": [
+    "A versioned historical OHLCV CSV with source, retrieval timestamp, and license/provenance notes",
+    "A checked-in experiment runner and reproducible output"
+  ],
+  "demo10": {
+    "dataKind": "synthetic",
+    "synthetic": true,
+    "plantedStructure": "Next-day residual return depends on 14-day momentum, distance from SMA, and inverse volume rank; see lib/data/universe.ts."
+  }
+}
